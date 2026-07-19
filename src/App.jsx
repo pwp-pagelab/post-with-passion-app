@@ -319,8 +319,9 @@ export function App() {
   const [context, setContext] = useState("");
   const [profile, setProfile] = useState(null);
   const [source, setSource] = useState(null);
-  const [brief, setBrief] = useState({ language: "Arabic", goal: "بناء الثقة والوعي", dialect: "العربية السعودية", format: "single_image", note: "" });
+  const [brief, setBrief] = useState({ language: "Arabic", goal: "بناء الثقة والوعي", dialect: "العربية السعودية", format: "single_image", note: "", styleExamples: "" });
   const [content, setContent] = useState(null);
+  const [editableContent, setEditableContent] = useState({ hook: "", post: "", cta: "" });
   const [design, setDesign] = useState(null);
   const [canvaPrompt, setCanvaPrompt] = useState("");
   const [error, setError] = useState("");
@@ -350,7 +351,7 @@ export function App() {
   const previewFont = fontPreference === "auto" ? (design?.typography?.fontFamily || "Cairo") : fontPreference;
   const filteredFonts = useMemo(() => fontCatalog.filter((font) => `${font.family} ${font.mood || ""} ${font.category || ""} ${(font.scripts || []).join(" ")}`.toLowerCase().includes(fontSearch.trim().toLowerCase())).slice(0, 120), [fontCatalog, fontSearch]);
   const hasExactFontMatch = fontCatalog.some((font) => font.family.toLowerCase() === fontSearch.trim().toLowerCase());
-  const captionText = content ? `${content.hook}\n\n${content.post}\n\n${content.cta}` : "";
+  const captionText = content ? `${editableContent.hook}\n\n${editableContent.post}\n\n${editableContent.cta}` : "";
   const hashtagText = content?.hashtags?.join(" ") || "";
 
   useEffect(() => {
@@ -383,12 +384,19 @@ export function App() {
     } catch (e) { setRuns((r) => ({ ...r, analyst: "error" })); setError(e.message); }
   }
 
-  async function write() {
+  async function write(angleOverride) {
     setError(""); setRuns((r) => ({ ...r, writer: "running" }));
     try {
-      const data = await api("/api/agents/write", { brandProfile: profile, brief });
-      setContent(data.result); setRuns((r) => ({ ...r, writer: "done" }));
+      const effectiveBrief = angleOverride ? { ...brief, note: `اكتب حول هذه الزاوية تحديدًا: ${angleOverride}` } : brief;
+      const data = await api("/api/agents/write", { brandProfile: profile, brief: effectiveBrief });
+      setContent(data.result);
+      setEditableContent({ hook: data.result.hook, post: data.result.post, cta: data.result.cta });
+      setRuns((r) => ({ ...r, writer: "done" }));
     } catch (e) { setRuns((r) => ({ ...r, writer: "error" })); setError(e.message); }
+  }
+
+  function useAlternativeAngle(angleText) {
+    write(angleText);
   }
 
   function designPost() {
@@ -452,6 +460,8 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
 
   function restart() {
     setStage(1); setRuns(initialRuns); setProfile(null); setContent(null); setDesign(null); setCanvaPrompt(""); setError("");
+    setEditableContent({ hook: "", post: "", cta: "" });
+    setBrief({ language: "Arabic", goal: "بناء الثقة والوعي", dialect: "العربية السعودية", format: "single_image", note: "", styleExamples: "" });
   }
 
   async function openCanvaWithPrompt() {
@@ -498,7 +508,7 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
     setTimeout(() => setNotice(""), 3200);
   }
 
-  const agentActive = runs.designer === "running" || stage === 3 ? 3 : runs.writer === "running" || stage === 2 ? 2 : 1;
+  const agentActive = runs.designer === "running" || stage === 3 ? 3 : runs.writer === "running" || stage === 2 || stage === 4 ? 2 : 1;
   const slides = useMemo(() => design?.slides?.length ? design.slides : content?.carouselSlides || [], [design, content]);
   const designPages = useMemo(() => design?.format === "carousel" ? slides : design ? [{ headline: design.headline, body: design.body, footer: design.footer, category: design.category, motif: design.motif, pageNumber: design.pageNumber }] : [], [design, slides]);
   const designText = useMemo(() => designPages.map((page) => `${page.headline || ""} ${page.body || ""} ${page.footer || ""} ${page.category || ""}`).join(" ").trim(), [designPages]);
@@ -586,19 +596,31 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
           <div className="two-fields"><div><label>هدف المنشور</label><select value={brief.goal} onChange={(e) => setBrief({ ...brief, goal: e.target.value })}><option>بناء الثقة والوعي</option><option>جذب عملاء محتملين</option><option>شرح خدمة</option><option>قيادة فكرية</option></select></div><div><label>{brief.language === "Arabic" ? "اللهجة" : "Content language"}</label><select value={brief.dialect} onChange={(e) => setBrief({ ...brief, dialect: e.target.value })}>{brief.language === "Arabic" ? <><option>العربية السعودية</option><option>العربية الفصحى</option></> : <option>English</option>}</select></div></div>
           <label>شكل المنشور</label>
           <div className="format-picker">
+            <button className={brief.format === "text_only" ? "selected" : ""} onClick={() => setBrief({ ...brief, format: "text_only" })}><PencilSimple weight="duotone" /><span><b>نص فقط</b><small>منشور بدون تصميم</small></span></button>
             <button className={brief.format === "single_image" ? "selected" : ""} onClick={() => setBrief({ ...brief, format: "single_image" })}><ImageSquare weight="duotone" /><span><b>منشور واحد</b><small>تصميم واحد برسالة مركّزة</small></span></button>
             <button className={brief.format === "carousel" ? "selected" : ""} onClick={() => setBrief({ ...brief, format: "carousel" })}><span className="carousel-symbol">▣</span><span><b>كاروسيل</b><small>من 4 إلى 7 صفحات</small></span></button>
           </div>
+          <label>أمثلة أسلوبك <em>اختياري — الصق منشورًا أو اثنين تحبهم</em></label>
+          <textarea value={brief.styleExamples} onChange={(e) => setBrief({ ...brief, styleExamples: e.target.value })} placeholder="الصق منشورًا فعليًا نشرته من قبل وعجبك أسلوبه، وAI بيحاكي إيقاعه بدل الاعتماد على تخمين عام..." />
           <label>توجيه إضافي <em>اختياري — اتركه فارغاً ليختار AI الموضوع</em></label>
           <textarea value={brief.note} onChange={(e) => setBrief({ ...brief, note: e.target.value })} placeholder="مثلاً: اربط الموضوع بتحديات التوسع..." />
-          <button className="run-agent" onClick={write} disabled={runs.writer === "running"}>{runs.writer === "running" ? <><i /> الكاتب يعمل...</> : <><MagicWand weight="fill" /> دع الكاتب يختار ويكتب</>}</button>
+          <button className="run-agent" onClick={() => write()} disabled={runs.writer === "running"}>{runs.writer === "running" ? <><i /> الكاتب يعمل...</> : <><MagicWand weight="fill" /> دع الكاتب يختار ويكتب</>}</button>
         </div>
         <div className="result-panel content-result">
           {!content ? <EmptyAgent icon={PencilSimple} title="الكاتب بانتظار الإشارة" text="سيختار زاوية غير عامة ويستخدم الحقائق المعتمدة من ملف الشركة." /> : <>
             <div className="content-top"><span>الزاوية التي اختارها AI</span><h2>{content.angle}</h2><button onClick={() => copyValue(captionText, "تم نسخ الكابشن")}><Copy /> نسخ الكابشن</button></div>
-            <blockquote>{content.hook}</blockquote><p className="post-copy">{content.post}</p><p className="cta">{content.cta}</p><div className="hashtags">{content.hashtags.map((x) => <span key={x}>{x}</span>)}</div>
+            {content.alternativeAngles?.length > 0 && <div className="alt-angles"><b>زوايا بديلة</b>{content.alternativeAngles.map((angle) => <button key={angle} onClick={() => useAlternativeAngle(angle)} disabled={runs.writer === "running"}>{angle}<span>جرّب هذي</span></button>)}</div>}
+            <label className="editable-label">الخطاف <em>قابل للتعديل</em></label>
+            <textarea className="editable-copy hook" value={editableContent.hook} onChange={(e) => setEditableContent({ ...editableContent, hook: e.target.value })} />
+            <label className="editable-label">النص <em>قابل للتعديل</em></label>
+            <textarea className="editable-copy post" value={editableContent.post} onChange={(e) => setEditableContent({ ...editableContent, post: e.target.value })} />
+            <label className="editable-label">الدعوة للفعل <em>قابل للتعديل</em></label>
+            <textarea className="editable-copy cta" value={editableContent.cta} onChange={(e) => setEditableContent({ ...editableContent, cta: e.target.value })} />
+            <div className="hashtags">{content.hashtags.map((x) => <span key={x}>{x}</span>)}</div>
             <div className="audit"><ShieldCheck /><span><b>الحقائق المستخدمة</b>{content.factsUsed.join(" · ") || "لا توجد ادعاءات رقمية"}</span></div>
-            <button className="approve" onClick={() => setStage(3)}><Check weight="bold" /> اعتماد النص وتسليمه للمصمم</button>
+            {content.recommendedFormat === "text_only"
+              ? <button className="approve" onClick={() => setStage(4)}><Check weight="bold" /> المنشور جاهز للنشر</button>
+              : <button className="approve" onClick={() => setStage(3)}><Check weight="bold" /> اعتماد النص وتسليمه للمصمم</button>}
           </>}
         </div>
       </section>}
@@ -636,6 +658,19 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
             <div className="canva-handoff"><b>الخطوة التالية</b><span>انسخ البرومبت، افتح Canva AI، الصقه، ثم ارفع اللوغو واختر النتيجة الأفضل.</span></div>
             <div className="design-actions"><button onClick={() => setStage(2)}><PencilSimple /> تعديل المحتوى</button><button className="canva-action" onClick={openCanvaWithPrompt}><span className="canva-mark">C</span> نسخ وفتح Canva</button></div>
           </>}
+        </div>
+      </section>}
+
+      {stage === 4 && <section className="stage-grid">
+        <div className="work-panel">
+          <button className="back" onClick={() => setStage(2)}><ArrowRight /> المحتوى</button>
+          <div className="stage-title"><span>04</span><div><h2>منشور نصي — بدون تصميم</h2><p>اخترت «نص فقط»، فمحرك التصميم مو مطلوب لهذا المنشور. انسخ وانشر مباشرة.</p></div></div>
+          <div className="analysis-note"><ShieldCheck size={18} /><span>ما تحتاج للمصمم؟ اضغط «تعديل المحتوى» وغيّر الشكل إلى «منشور واحد» أو «كاروسيل» أي وقت.</span></div>
+        </div>
+        <div className="result-panel">
+          <div className="content-top"><span>جاهز للنشر</span><h2>{content?.angle}</h2><button onClick={() => copyValue(captionText, "تم نسخ الكابشن")}><Copy /> نسخ الكابشن</button></div>
+          <p className="post-copy" style={{ whiteSpace: "pre-line" }}>{captionText}</p>
+          <div className="hashtags">{content?.hashtags?.map((x) => <span key={x}>{x}</span>)}</div>
         </div>
       </section>}
     </main>
