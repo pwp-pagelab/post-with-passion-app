@@ -74,9 +74,8 @@ function wrapText(value = "", limit = 24) {
 }
 
 function svgText({ text, x, y, size, lineHeight, weight, fill, anchor, maxLines, limit }) {
-  const dir = /[\u0600-\u06FF]/.test(String(text)) ? "rtl" : "ltr";
   return wrapText(text, limit).slice(0, maxLines).map((line, index) =>
-    `<text x="${x}" y="${y + index * lineHeight}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}" direction="${dir}">${escapeXml(bidiSafe(line))}</text>`
+    `<text x="${x}" y="${y + index * lineHeight}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}" direction="auto">${escapeXml(bidiSafe(line))}</text>`
   ).join("");
 }
 
@@ -276,14 +275,14 @@ function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, pa
     ${styleTag}
     <rect width="1080" height="1080" fill="${light}"/>
     ${logoTag}
-    <text x="990" y="205" fill="${green}" font-size="24" font-weight="600" text-anchor="end" direction="rtl">${escapeXml(bidiSafe(footerCategory))}</text>
+    <text x="990" y="205" fill="${green}" font-size="24" font-weight="600" text-anchor="end" direction="auto">${escapeXml(bidiSafe(footerCategory))}</text>
     ${svgText({ text: headline, x: 990, y: 300, size: 70, lineHeight: 81, weight: 800, fill: dark, anchor: "end", maxLines: 3, limit: 22 })}
     <line x1="90" y1="675" x2="990" y2="675" stroke="${dark}" stroke-opacity="0.20"/>
     ${svgText({ text: body, x: 990, y: 750, size: 34, lineHeight: 51, weight: 400, fill: dark, anchor: "end", maxLines: 2, limit: 34 })}
-    <text x="990" y="920" fill="${dark}" fill-opacity="0.06" font-size="170" font-weight="800" text-anchor="end" direction="rtl">${escapeXml(ghostWord)}</text>
+    <text x="990" y="920" fill="${dark}" fill-opacity="0.06" font-size="170" font-weight="800" text-anchor="end" direction="auto">${escapeXml(ghostWord)}</text>
     <line x1="90" y1="972" x2="990" y2="972" stroke="${dark}" stroke-opacity="0.30"/>
     <text x="90" y="1022" fill="${dark}" font-size="22" font-weight="600" text-anchor="start" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
-    <text x="990" y="1022" fill="${dark}" font-size="22" font-weight="600" text-anchor="end" direction="rtl">${escapeXml(bidiSafe(footerCategory))}</text>
+    <text x="990" y="1022" fill="${dark}" font-size="22" font-weight="600" text-anchor="end" direction="auto">${escapeXml(bidiSafe(footerCategory))}</text>
   </svg>`;
 }
 
