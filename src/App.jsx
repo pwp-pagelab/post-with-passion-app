@@ -144,44 +144,135 @@ async function makeDesignPngBlob({ headline, body, footer, palette, font, logo, 
   return await new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("PNG export failed")), "image/png", 1));
 }
 
+function footerBlock({ x, arabic, foreground, pageNumber, page, category }) {
+  return `<line x1="90" y1="972" x2="990" y2="972" stroke="${foreground}" stroke-opacity="0.25"/>
+    <text x="${arabic ? 90 : 990}" y="1022" fill="${foreground}" font-size="22" font-weight="600" text-anchor="${arabic ? "start" : "end"}" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
+    <text x="${arabic ? 990 : 90}" y="1022" fill="${foreground}" font-size="22" font-weight="600" text-anchor="${arabic ? "end" : "start"}" direction="auto">${escapeXml(category || "")}</text>`;
+}
+
 function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, palette, font, fontCss = "", logo, page = 1 }) {
-  const background = palette[(page - 1) % palette.length] || "#0E3A31";
-  const accent = palette[1] || "#D7C196";
-  const foreground = page % palette.length === 0 ? (palette[0] || "#0E3A31") : "#FFFFFF";
+  const dark = palette[0] || "#0E3A31";
+  const green = palette[1] || "#168164";
+  const gold = palette[2] || "#D7C196";
+  const light = palette[3] || "#F5F1E8";
   const arabic = /[\u0600-\u06FF]/.test(`${headline} ${body} ${footer}`);
   const x = arabic ? 990 : 90;
   const anchor = arabic ? "end" : "start";
   const fontStyles = fontCss ? fontCss.replace(/<\/style/gi, "") : `@import url("${escapeXml(googleFontCssUrl(font))}");`;
-  if (motif === "H") {
-    const light = palette[3] || "#F5F1E8";
-    const dark = palette[0] || "#0E3A31";
-    const green = palette[1] || "#168164";
-    const ghostWord = words(headline).slice(0, 1).join("") || "PWP";
-    const footerCategory = category || footer || "فكرة أساسية";
+  const styleTag = `<style>${fontStyles} text{font-family:'${escapeXml(font)}',Arial,sans-serif}</style>`;
+  const logoTag = logo ? `<image href="${escapeXml(logo)}" x="${arabic ? 830 : 90}" y="60" width="190" height="40" preserveAspectRatio="${arabic ? "xMaxYMid" : "xMinYMid"} meet"/>` : "";
+  const ghostWord = words(headline).slice(0, 1).join("") || "PWP";
+
+  if (motif === "A") {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-      <style>${fontStyles} text{font-family:'${escapeXml(font)}',Arial,sans-serif}</style>
-      <rect width="1080" height="1080" fill="${light}"/>
-      ${logo ? `<image href="${escapeXml(logo)}" x="830" y="60" width="190" height="40" preserveAspectRatio="xMaxYMid meet"/>` : ""}
-      <text x="990" y="205" fill="${green}" font-size="24" font-weight="600" text-anchor="end" direction="rtl">${escapeXml(footerCategory)}</text>
-      ${svgText({ text: headline, x: 990, y: 300, size: 70, lineHeight: 81, weight: 800, fill: dark, anchor: "end", maxLines: 3, limit: 22 })}
-      <line x1="90" y1="675" x2="990" y2="675" stroke="${dark}" stroke-opacity="0.20"/>
-      ${svgText({ text: body, x: 990, y: 750, size: 34, lineHeight: 51, weight: 400, fill: dark, anchor: "end", maxLines: 2, limit: 34 })}
-      <text x="990" y="920" fill="${dark}" fill-opacity="0.06" font-size="170" font-weight="800" text-anchor="end" direction="rtl">${escapeXml(ghostWord)}</text>
-      <line x1="90" y1="972" x2="990" y2="972" stroke="${dark}" stroke-opacity="0.30"/>
-      <text x="90" y="1022" fill="${dark}" font-size="22" font-weight="600" text-anchor="start" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
-      <text x="990" y="1022" fill="${dark}" font-size="22" font-weight="600" text-anchor="end" direction="rtl">${escapeXml(footerCategory)}</text>
+      ${styleTag}
+      <rect width="1080" height="1080" fill="${dark}"/>
+      <text x="${x}" y="640" fill="${light}" fill-opacity="0.08" font-size="620" font-weight="800" text-anchor="${anchor}" direction="auto">${escapeXml(ghostWord)}</text>
+      ${logoTag}
+      <rect x="${arabic ? 900 : 90}" y="150" width="90" height="34" rx="17" fill="${gold}"/>
+      <text x="${arabic ? 945 : 135}" y="173" fill="${dark}" font-size="16" font-weight="700" text-anchor="middle">${escapeXml(category || "")}</text>
+      ${svgText({ text: headline, x, y: 340, size: 78, lineHeight: 92, weight: 800, fill: light, anchor, maxLines: 3, limit: 20 })}
+      <line x1="90" y1="640" x2="${arabic ? 300 : 990}" y2="640" stroke="${gold}" stroke-width="4"/>
+      ${footerBlock({ x, arabic, foreground: light, pageNumber, page, category })}
     </svg>`;
   }
+
+  if (motif === "B") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
+      ${styleTag}
+      <rect width="1080" height="1080" fill="${light}"/>
+      <line x1="0" y1="360" x2="1080" y2="360" stroke="${dark}" stroke-opacity="0.08"/>
+      <line x1="0" y1="720" x2="1080" y2="720" stroke="${dark}" stroke-opacity="0.08"/>
+      ${logoTag}
+      <text x="${arabic ? 90 : 990}" y="130" fill="${dark}" fill-opacity="0.18" font-size="90" font-weight="800" text-anchor="${arabic ? "start" : "end"}" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
+      ${svgText({ text: headline, x, y: 420, size: 68, lineHeight: 82, weight: 700, fill: dark, anchor, maxLines: 3, limit: 22 })}
+      <rect x="${arabic ? 984 : 90}" y="560" width="6" height="220" fill="${green}"/>
+      ${svgText({ text: body, x: arabic ? 964 : 110, y: 600, size: 34, lineHeight: 50, weight: 400, fill: dark, anchor, maxLines: 4, limit: 38 })}
+      ${footerBlock({ x, arabic, foreground: dark, pageNumber, page, category })}
+    </svg>`;
+  }
+
+  if (motif === "C") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
+      ${styleTag}
+      <rect width="1080" height="1080" fill="${gold}"/>
+      <circle cx="${arabic ? 900 : 180}" cy="230" r="150" fill="${green}" fill-opacity="0.35"/>
+      <circle cx="${arabic ? 820 : 260}" cy="330" r="100" fill="${dark}" fill-opacity="0.25"/>
+      <circle cx="${arabic ? 860 : 220}" cy="280" r="46" fill="${light}"/>
+      ${logoTag}
+      <text x="${x}" y="430" fill="${dark}" fill-opacity="0.18" font-size="150" font-weight="800" text-anchor="${anchor}" direction="ltr">”</text>
+      ${svgText({ text: headline, x, y: 560, size: 62, lineHeight: 78, weight: 700, fill: dark, anchor, maxLines: 3, limit: 22 })}
+      ${svgText({ text: body, x, y: 780, size: 34, lineHeight: 50, weight: 400, fill: dark, anchor, maxLines: 3, limit: 38 })}
+      ${footerBlock({ x, arabic, foreground: dark, pageNumber, page, category })}
+    </svg>`;
+  }
+
+  if (motif === "D") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
+      ${styleTag}
+      <rect width="1080" height="1080" fill="${dark}"/>
+      <rect x="${arabic ? 560 : -120}" y="-80" width="640" height="640" fill="${green}" fill-opacity="0.55" transform="rotate(18 ${arabic ? 880 : 200} 240)"/>
+      <rect x="${arabic ? 460 : -60}" y="40" width="500" height="500" fill="${green}" fill-opacity="0.35" transform="rotate(-12 ${arabic ? 780 : 260} 300)"/>
+      ${logoTag}
+      ${svgText({ text: headline, x, y: 480, size: 72, lineHeight: 86, weight: 700, fill: light, anchor, maxLines: 3, limit: 20 })}
+      <line x1="90" y1="620" x2="990" y2="620" stroke="${gold}" stroke-width="2"/>
+      ${svgText({ text: body, x, y: 690, size: 34, lineHeight: 50, weight: 400, fill: light, anchor, maxLines: 3, limit: 38 })}
+      ${footerBlock({ x, arabic, foreground: light, pageNumber, page, category })}
+    </svg>`;
+  }
+
+  if (motif === "E") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
+      ${styleTag}
+      <rect width="1080" height="1080" fill="${light}"/>
+      <polygon points="${arabic ? "1080,0 1080,1080 300,1080" : "0,0 0,1080 780,1080"}" fill="${green}"/>
+      ${logoTag}
+      ${svgText({ text: headline, x: arabic ? 990 : 90, y: 300, size: 66, lineHeight: 80, weight: 700, fill: dark, anchor, maxLines: 3, limit: 20 })}
+      ${svgText({ text: body, x: arabic ? 940 : 140, y: 780, size: 34, lineHeight: 50, weight: 400, fill: light, anchor, maxLines: 3, limit: 34 })}
+      ${footerBlock({ x, arabic, foreground: dark, pageNumber, page, category })}
+    </svg>`;
+  }
+
+  if (motif === "F") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
+      ${styleTag}
+      <rect width="1080" height="1080" fill="${green}"/>
+      ${logoTag}
+      ${svgText({ text: headline, x, y: 260, size: 40, lineHeight: 52, weight: 700, fill: light, anchor, maxLines: 2, limit: 30 })}
+      <text x="${x}" y="640" fill="${light}" font-size="340" font-weight="800" text-anchor="${anchor}" direction="ltr">${escapeXml(String(pageNumber || page))}</text>
+      <line x1="90" y1="740" x2="990" y2="740" stroke="${light}" stroke-opacity="0.3"/>
+      ${svgText({ text: body, x, y: 800, size: 32, lineHeight: 46, weight: 400, fill: light, anchor, maxLines: 2, limit: 40 })}
+      ${footerBlock({ x, arabic, foreground: light, pageNumber, page, category })}
+    </svg>`;
+  }
+
+  if (motif === "G") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
+      ${styleTag}
+      <rect width="1080" height="1080" fill="${dark}"/>
+      <rect x="20" y="20" width="1040" height="1040" fill="none" stroke="${gold}" stroke-width="1" stroke-opacity="0.7"/>
+      ${logoTag}
+      ${svgText({ text: headline, x, y: 420, size: 70, lineHeight: 84, weight: 700, fill: light, anchor, maxLines: 3, limit: 22 })}
+      ${svgText({ text: body, x, y: 680, size: 34, lineHeight: 50, weight: 400, fill: light, anchor, maxLines: 3, limit: 38 })}
+      <text x="540" y="1000" fill="${gold}" font-size="20" font-weight="600" text-anchor="middle">${escapeXml(footer || category || "")}</text>
+      ${footerBlock({ x, arabic, foreground: light, pageNumber, page, category: "" })}
+    </svg>`;
+  }
+
+  // H — Layered typography (default and fallback)
+  const footerCategory = category || footer || "فكرة أساسية";
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-    <style>${fontStyles} text{font-family:'${escapeXml(font)}',Arial,sans-serif}</style>
-    <rect width="1080" height="1080" rx="42" fill="${background}"/>
-    <rect x="${arabic ? 930 : 90}" y="210" width="60" height="10" rx="5" fill="${accent}"/>
-    ${logo ? `<image href="${escapeXml(logo)}" x="${arabic ? 830 : 90}" y="70" width="160" height="90" preserveAspectRatio="xMidYMid meet"/>` : ""}
-    ${svgText({ text: headline, x, y: 360, size: 84, lineHeight: 100, weight: 700, fill: foreground, anchor, maxLines: 3, limit: 22 })}
-    ${svgText({ text: body, x, y: 700, size: 38, lineHeight: 56, weight: 400, fill: foreground, anchor, maxLines: 4, limit: 42 })}
-    <line x1="90" y1="940" x2="990" y2="940" stroke="${foreground}" stroke-opacity="0.25"/>
-    <text x="${x}" y="1000" fill="${foreground}" font-size="26" font-weight="500" text-anchor="${anchor}" direction="auto">${escapeXml(footer)}</text>
-    <text x="${arabic ? 90 : 990}" y="1000" fill="${foreground}" fill-opacity="0.7" font-size="22" text-anchor="${arabic ? "start" : "end"}">${String(page).padStart(2, "0")}</text>
+    ${styleTag}
+    <rect width="1080" height="1080" fill="${light}"/>
+    ${logoTag}
+    <text x="990" y="205" fill="${green}" font-size="24" font-weight="600" text-anchor="end" direction="rtl">${escapeXml(footerCategory)}</text>
+    ${svgText({ text: headline, x: 990, y: 300, size: 70, lineHeight: 81, weight: 800, fill: dark, anchor: "end", maxLines: 3, limit: 22 })}
+    <line x1="90" y1="675" x2="990" y2="675" stroke="${dark}" stroke-opacity="0.20"/>
+    ${svgText({ text: body, x: 990, y: 750, size: 34, lineHeight: 51, weight: 400, fill: dark, anchor: "end", maxLines: 2, limit: 34 })}
+    <text x="990" y="920" fill="${dark}" fill-opacity="0.06" font-size="170" font-weight="800" text-anchor="end" direction="rtl">${escapeXml(ghostWord)}</text>
+    <line x1="90" y1="972" x2="990" y2="972" stroke="${dark}" stroke-opacity="0.30"/>
+    <text x="90" y="1022" fill="${dark}" font-size="22" font-weight="600" text-anchor="start" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
+    <text x="990" y="1022" fill="${dark}" font-size="22" font-weight="600" text-anchor="end" direction="rtl">${escapeXml(footerCategory)}</text>
   </svg>`;
 }
 
@@ -339,12 +430,12 @@ APPROVED PAGE SPECIFICATIONS:
 ${contentBlock}
 
 STRICT RULES: Use exactly the assigned motif on each page and only its listed visual elements. Never add icons, chat bubbles, illustrations, extra circles, extra lines, gradients, or decorative shapes. Never show the labels “Headline”, “Body”, “Footer”, “Motif”, or “Slide type”. Do not change approved copy or invent claims. Do not shrink type to fit more text. Keep one idea per page. Never repeat the same motif on consecutive pages. Make all elements editable in Canva.${isCarousel ? " Keep all pages visibly related through typography, footer, logo, spacing, and palette." : " Deliver one focused square composition."}`;
-    const localPages = promptPages.map((pageData) => ({ ...pageData, motif: "H", footer: pageData.category }));
+    const localPages = promptPages.map((pageData) => ({ ...pageData, footer: pageData.category }));
     if (isCarousel) {
-      setDesign({ format: "carousel", concept: "PWP Motif H — Layered Typography", imageDirection: "Pixel-stable local preview based on the approved design system.", palette, typography: { fontFamily: chosenFont }, slides: localPages });
+      setDesign({ format: "carousel", concept: "PWP Motif System — A–H", imageDirection: "Pixel-stable local preview based on the approved design system.", palette, typography: { fontFamily: chosenFont }, slides: localPages });
     } else {
       const pageData = localPages[0];
-      setDesign({ format: "single_image", concept: "PWP Motif H — Layered Typography", imageDirection: "Pixel-stable local preview based on the approved design system.", palette, typography: { fontFamily: chosenFont }, slides: [], ...pageData });
+      setDesign({ format: "single_image", concept: `PWP Motif ${pageData.motif}`, imageDirection: "Pixel-stable local preview based on the approved design system.", palette, typography: { fontFamily: chosenFont }, slides: [], ...pageData });
     }
     setCanvaPrompt(prompt);
     setRuns((r) => ({ ...r, designer: "done" }));
@@ -534,7 +625,7 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
         </div>
         <div className="result-panel design-result">
           {!canvaPrompt ? <EmptyAgent icon={Palette} title="التصميم سيظهر هنا" text="اضبط الهوية والخط، ثم أنشئ معاينة الموتيف H وبرومبت Canva." /> : <>
-            <div className="design-meta"><div><span>المرحلة الأولى · Motif H</span><h2>طبقات كتابية منضبطة</h2><p>معاينة محلية ثابتة للتحقق البصري قبل إضافة الموتيفات A–G.</p></div><b>{content?.recommendedFormat === "carousel" ? `${content.carouselSlides?.length || 0} صفحات` : "صورة واحدة"} · 1080 × 1080</b></div>
+            <div className="design-meta"><div><span>نظام الموتيفات · A–H</span><h2>معاينة حقيقية لكل صفحة بموتيفها الفعلي</h2><p>كل صفحة تترسم محليًا بنفس الموتيف المعتمد لها — مو معاينة عامة تُستبدل لاحقًا داخل Canva.</p></div><b>{content?.recommendedFormat === "carousel" ? `${content.carouselSlides?.length || 0} صفحات` : "صورة واحدة"} · 1080 × 1080</b></div>
             {previewRendering || !previewPngs.length ? <div className="preview-loading"><i /> جاري تجهيز معاينة PWP المطابقة للتنزيل...</div> : design?.format === "carousel" ? <div className="slides-preview canonical-slides">{previewPngs.map((src, i) => <article key={`pwp-preview-${i}`}><img src={src} alt={`معاينة الصفحة ${i + 1}`} /></article>)}</div> : <div className="canonical-preview"><img src={previewPngs[0]} alt="معاينة التصميم" /></div>}
             <div className="design-actions phase-one-actions"><button onClick={downloadDesign} disabled={fontEmbedding || !embeddedFontCss || previewRendering}><DownloadSimple weight="bold" /> SVG</button><button className="approve" onClick={downloadDesignPng} disabled={fontEmbedding || !embeddedFontCss || previewRendering}><DownloadSimple weight="bold" /> تحميل PNG</button></div>
             <article className="canva-prompt-card"><div><span>برومبت التصميم</span><button onClick={() => copyValue(canvaPrompt, "تم نسخ برومبت Canva")}><Copy /> نسخ</button></div><pre>{canvaPrompt}</pre></article>
