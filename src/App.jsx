@@ -50,6 +50,16 @@ function escapeXml(value = "") {
   return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+function bidiSafe(value = "") {
+  const text = String(value);
+  const arabic = /[\u0600-\u06FF]/.test(text);
+  if (!arabic) return text;
+  // Wrap digit runs in RLM (U+200F) so numbers stay anchored in their
+  // correct reading position inside right-to-left sentences instead of
+  // being pushed to the visual end of the line by the browser's bidi algorithm.
+  return text.replace(/([0-9]+)/g, "\u200F$1\u200F");
+}
+
 function wrapText(value = "", limit = 24) {
   const words = String(value).trim().split(/\s+/).filter(Boolean);
   const lines = [];
@@ -64,8 +74,9 @@ function wrapText(value = "", limit = 24) {
 }
 
 function svgText({ text, x, y, size, lineHeight, weight, fill, anchor, maxLines, limit }) {
+  const dir = /[\u0600-\u06FF]/.test(String(text)) ? "rtl" : "ltr";
   return wrapText(text, limit).slice(0, maxLines).map((line, index) =>
-    `<text x="${x}" y="${y + index * lineHeight}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}" direction="auto">${escapeXml(line)}</text>`
+    `<text x="${x}" y="${y + index * lineHeight}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}" direction="${dir}">${escapeXml(bidiSafe(line))}</text>`
   ).join("");
 }
 
@@ -147,7 +158,7 @@ async function makeDesignPngBlob({ headline, body, footer, palette, font, logo, 
 function footerBlock({ x, arabic, foreground, pageNumber, page, category }) {
   return `<line x1="90" y1="972" x2="990" y2="972" stroke="${foreground}" stroke-opacity="0.25"/>
     <text x="${arabic ? 90 : 990}" y="1022" fill="${foreground}" font-size="22" font-weight="600" text-anchor="${arabic ? "start" : "end"}" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
-    <text x="${arabic ? 990 : 90}" y="1022" fill="${foreground}" font-size="22" font-weight="600" text-anchor="${arabic ? "end" : "start"}" direction="auto">${escapeXml(category || "")}</text>`;
+    <text x="${arabic ? 990 : 90}" y="1022" fill="${foreground}" font-size="22" font-weight="600" text-anchor="${arabic ? "end" : "start"}" direction="auto">${escapeXml(bidiSafe(category || ""))}</text>`;
 }
 
 function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, palette, font, fontCss = "", logo, page = 1 }) {
@@ -170,7 +181,7 @@ function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, pa
       <text x="${x}" y="640" fill="${light}" fill-opacity="0.08" font-size="620" font-weight="800" text-anchor="${anchor}" direction="auto">${escapeXml(ghostWord)}</text>
       ${logoTag}
       <rect x="${arabic ? 900 : 90}" y="150" width="90" height="34" rx="17" fill="${gold}"/>
-      <text x="${arabic ? 945 : 135}" y="173" fill="${dark}" font-size="16" font-weight="700" text-anchor="middle">${escapeXml(category || "")}</text>
+      <text x="${arabic ? 945 : 135}" y="173" fill="${dark}" font-size="16" font-weight="700" text-anchor="middle">${escapeXml(bidiSafe(category || ""))}</text>
       ${svgText({ text: headline, x, y: 340, size: 78, lineHeight: 92, weight: 800, fill: light, anchor, maxLines: 3, limit: 20 })}
       <line x1="90" y1="640" x2="${arabic ? 300 : 990}" y2="640" stroke="${gold}" stroke-width="4"/>
       ${footerBlock({ x, arabic, foreground: light, pageNumber, page, category })}
@@ -254,7 +265,7 @@ function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, pa
       ${logoTag}
       ${svgText({ text: headline, x, y: 420, size: 70, lineHeight: 84, weight: 700, fill: light, anchor, maxLines: 3, limit: 22 })}
       ${svgText({ text: body, x, y: 680, size: 34, lineHeight: 50, weight: 400, fill: light, anchor, maxLines: 3, limit: 38 })}
-      <text x="540" y="1000" fill="${gold}" font-size="20" font-weight="600" text-anchor="middle">${escapeXml(footer || category || "")}</text>
+      <text x="540" y="1000" fill="${gold}" font-size="20" font-weight="600" text-anchor="middle">${escapeXml(bidiSafe(footer || category || ""))}</text>
       ${footerBlock({ x, arabic, foreground: light, pageNumber, page, category: "" })}
     </svg>`;
   }
@@ -265,14 +276,14 @@ function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, pa
     ${styleTag}
     <rect width="1080" height="1080" fill="${light}"/>
     ${logoTag}
-    <text x="990" y="205" fill="${green}" font-size="24" font-weight="600" text-anchor="end" direction="rtl">${escapeXml(footerCategory)}</text>
+    <text x="990" y="205" fill="${green}" font-size="24" font-weight="600" text-anchor="end" direction="rtl">${escapeXml(bidiSafe(footerCategory))}</text>
     ${svgText({ text: headline, x: 990, y: 300, size: 70, lineHeight: 81, weight: 800, fill: dark, anchor: "end", maxLines: 3, limit: 22 })}
     <line x1="90" y1="675" x2="990" y2="675" stroke="${dark}" stroke-opacity="0.20"/>
     ${svgText({ text: body, x: 990, y: 750, size: 34, lineHeight: 51, weight: 400, fill: dark, anchor: "end", maxLines: 2, limit: 34 })}
     <text x="990" y="920" fill="${dark}" fill-opacity="0.06" font-size="170" font-weight="800" text-anchor="end" direction="rtl">${escapeXml(ghostWord)}</text>
     <line x1="90" y1="972" x2="990" y2="972" stroke="${dark}" stroke-opacity="0.30"/>
     <text x="90" y="1022" fill="${dark}" font-size="22" font-weight="600" text-anchor="start" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
-    <text x="990" y="1022" fill="${dark}" font-size="22" font-weight="600" text-anchor="end" direction="rtl">${escapeXml(footerCategory)}</text>
+    <text x="990" y="1022" fill="${dark}" font-size="22" font-weight="600" text-anchor="end" direction="rtl">${escapeXml(bidiSafe(footerCategory))}</text>
   </svg>`;
 }
 
