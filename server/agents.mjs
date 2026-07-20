@@ -1,6 +1,5 @@
 import { GOOGLE_FONTS, GOOGLE_FONT_FAMILIES } from "../shared/google-fonts.mjs";
 
-const OPENAI_URL = "https://api.openai.com/v1/responses";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models?limit=100";
 let fontCatalogCache = null;
@@ -154,23 +153,6 @@ async function fetchWebsite(input) {
   } finally { clearTimeout(timer); }
 }
 
-function outputText(response) {
-  for (const item of response.output || []) for (const content of item.content || []) if (content.type === "output_text" && content.text) return content.text;
-  throw new Error("The model returned no structured output");
-}
-
-async function runAgent({ apiKey, model, name, schema, instructions, input }) {
-  if (!apiKey) throw Object.assign(new Error("OPENAI_API_KEY is not configured"), { code: "missing_api_key" });
-  const response = await fetch(OPENAI_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, instructions, input, text: { format: { type: "json_schema", name, strict: true, schema } } })
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error?.message || `OpenAI request failed (${response.status})`);
-  return JSON.parse(outputText(payload));
-}
-
 async function resolveAnthropicModel(apiKey, preferredModel) {
   if (anthropicModelCache) return anthropicModelCache;
   const response = await fetch(ANTHROPIC_MODELS_URL, {
@@ -212,16 +194,12 @@ async function runClaude({ apiKey, model, schema, instructions, input, toolName 
   return toolUse.input;
 }
 
-export function createAgentsMiddleware({ apiKey, model, googleFontsApiKey, anthropicApiKey, anthropicModel }) {
+export function createAgentsMiddleware({ googleFontsApiKey, anthropicApiKey, anthropicModel }) {
   return async function agentsMiddleware(req, res, next) {
     if (!req.url?.startsWith("/api/")) return next();
     if (req.method === "GET" && req.url === "/api/status") return json(res, 200, {
-      configured: Boolean(apiKey),
-      model,
-      writerConfigured: Boolean(anthropicApiKey),
-      writerModel: anthropicModel,
-      designerConfigured: Boolean(anthropicApiKey),
-      designerModel: anthropicModel
+      configured: Boolean(anthropicApiKey),
+      model: anthropicModel
     });
     if (req.method === "GET" && req.url === "/api/fonts") {
       const catalog = await fetchFontCatalog(googleFontsApiKey);
@@ -232,7 +210,8 @@ export function createAgentsMiddleware({ apiKey, model, googleFontsApiKey, anthr
       const body = await readJson(req);
       if (req.url === "/api/agents/analyze") {
         const site = await fetchWebsite(body.url);
-        const result = await runAgent({ apiKey, model, name: "brand_profile", schema: schemas.brand_profile,
+        const result = await runClaude({ apiKey: anthropicApiKey, model: anthropicModel, schema: schemas.brand_profile,
+          toolName: "submit_brand_profile", toolDescription: "Return the final verified brand profile.",
           instructions: "You are Brand Analyst, the first of three agents. Analyze only the supplied website evidence. Extract verified company facts, services, audiences, markets, differentiation, brand voice, and useful LinkedIn content pillars. Never invent numbers, customers, outcomes, or services. Put missing or uncertain information in unknowns. Write the entire structured response in the user's requested content language.",
           input: `Requested content language: ${body.contentLanguage === "English" ? "English" : "Arabic"}\nSource URL: ${site.finalUrl}\nDetected visual signals: ${JSON.stringify(site.visuals)}\nAdditional client context: ${body.context || "none"}\nWebsite text:\n${site.text}` });
         return json(res, 200, { result, source: { url: site.finalUrl, ...site.visuals } });
