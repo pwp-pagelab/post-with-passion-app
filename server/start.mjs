@@ -8,8 +8,6 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const dist = resolve(root, "dist");
 const port = Number(process.env.PORT || 4173);
 const agents = createAgentsMiddleware({
-  apiKey: process.env.OPENAI_API_KEY,
-  model: process.env.OPENAI_MODEL || "gpt-5.4-mini",
   googleFontsApiKey: process.env.GOOGLE_FONTS_API_KEY,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   anthropicModel: process.env.ANTHROPIC_MODEL || "claude-sonnet-5"
