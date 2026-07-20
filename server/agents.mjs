@@ -186,10 +186,9 @@ async function resolveAnthropicModel(apiKey, preferredModel) {
   return anthropicModelCache;
 }
 
-async function runClaudeDesigner({ apiKey, model, schema, instructions, input }) {
+async function runClaude({ apiKey, model, schema, instructions, input, toolName = "submit_structured_output", toolDescription = "Return the final structured result." }) {
   if (!apiKey) throw Object.assign(new Error("ANTHROPIC_API_KEY is not configured"), { code: "missing_anthropic_api_key" });
   const availableModel = await resolveAnthropicModel(apiKey, model);
-  const toolName = "submit_design_spec";
   const response = await fetch(ANTHROPIC_URL, {
     method: "POST",
     headers: {
@@ -202,14 +201,14 @@ async function runClaudeDesigner({ apiKey, model, schema, instructions, input })
       max_tokens: 4096,
       system: instructions,
       messages: [{ role: "user", content: input }],
-      tools: [{ name: toolName, description: "Return the final production-ready LinkedIn design specification.", input_schema: schema }],
+      tools: [{ name: toolName, description: toolDescription, input_schema: schema }],
       tool_choice: { type: "tool", name: toolName }
     })
   });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error?.message || `Anthropic request failed (${response.status})`);
   const toolUse = payload.content?.find((block) => block.type === "tool_use" && block.name === toolName);
-  if (!toolUse?.input) throw new Error("Claude returned no structured design specification");
+  if (!toolUse?.input) throw new Error("Claude returned no structured output");
   return toolUse.input;
 }
 
@@ -219,6 +218,8 @@ export function createAgentsMiddleware({ apiKey, model, googleFontsApiKey, anthr
     if (req.method === "GET" && req.url === "/api/status") return json(res, 200, {
       configured: Boolean(apiKey),
       model,
+      writerConfigured: Boolean(anthropicApiKey),
+      writerModel: anthropicModel,
       designerConfigured: Boolean(anthropicApiKey),
       designerModel: anthropicModel
     });
@@ -240,7 +241,8 @@ export function createAgentsMiddleware({ apiKey, model, googleFontsApiKey, anthr
         const styleExamples = Array.isArray(body.brief?.styleExamples)
           ? body.brief.styleExamples.filter(Boolean).slice(0, 3)
           : String(body.brief?.styleExamples || "").trim() ? [String(body.brief.styleExamples).trim()] : [];
-        const result = await runAgent({ apiKey, model, name: "linkedin_content", schema: schemas.linkedin_content,
+        const result = await runClaude({ apiKey: anthropicApiKey, model: anthropicModel, schema: schemas.linkedin_content,
+          toolName: "submit_linkedin_content", toolDescription: "Return the final approved LinkedIn content and design copy.",
           instructions: "You are LinkedIn Content Strategist and carousel editor, the second of three agents. Use only the approved brand profile and user brief. Never add unsupported claims.\n\nBANNED PATTERNS — never use these, in any language: generic openers like 'In today's world', 'في عالم اليوم', 'الحقيقة إن', 'دعني أخبرك'; rhetorical questions as openers ('هل تعلم أن...?', 'Did you know...?'); rocket/fire/sparkle emojis or any emoji used as a bullet marker; three-item listicle structures unless the content is genuinely three real steps; corporate filler words (unlock, leverage, seamless, game-changer, revolutionize, تمكين, نقلة نوعية, ثورة في); a hook that just restates the headline as a question; closing with 'What do you think? Comment below' unless the brief goal is genuinely to spark discussion. If the brand voice 'avoid' list bans something, treat it as equally forbidden.\n\nVOICE MATCHING: If styleExamples are supplied, they are real posts the client already likes. Match their sentence rhythm, average sentence length, and level of formality closely — treat them as the ground truth for voice, weighted above the generic brand voice traits. Do not copy their specific claims or sentences, only the writing style.\n\nCreate designCopy with one short visual idea: headline maximum 6-8 words, body maximum 20-25 words, category maximum two words, and an accurate slideType. Never shrink or overload design copy. If recommendedFormat is text_only, still populate designCopy from the post's core idea in case the user changes format later, and return an empty carouselSlides array. For single_image, return an empty carouselSlides array. For carousel, produce 4-7 slides, exactly one idea per slide. Each carousel headline is maximum 6-8 words and each body is maximum 20-25 words. The first slide is slideType hook and the last is conclusion. Use comparison only for real contrast, numbered for steps or numbered ideas, quote for a genuine voice/opinion, statement for a short strong assertion, explanatory for analysis, and standard otherwise. Do not lose meaning or add claims while splitting.\n\nChoose one sharp, non-generic angle for the main post. Also return alternativeAngles: exactly two other genuinely different one-line angle ideas (different enough that picking one would change the whole post, not just its phrasing) that this brand could also credibly post about right now, so the user can pick a different direction without leaving the app. Return factsUsed so the user can audit the copy.",
           input: `Approved brand profile:\n${JSON.stringify(body.brandProfile)}\nContent brief:\n${JSON.stringify(body.brief)}${styleExamples.length ? `\nReal posts to match the voice of (style only, do not reuse claims):\n${styleExamples.map((example, i) => `Example ${i + 1}:\n${example}`).join("\n\n")}` : ""}` });
         result.recommendedFormat = body.brief?.format === "carousel" ? "carousel" : body.brief?.format === "text_only" ? "text_only" : "single_image";
@@ -251,7 +253,8 @@ export function createAgentsMiddleware({ apiKey, model, googleFontsApiKey, anthr
         const preferredFont = String(body.brandKit?.preferredFont || "auto").trim();
         const allowedFonts = preferredFont === "auto" ? GOOGLE_FONT_FAMILIES : [preferredFont];
         const fontOptions = preferredFont === "auto" ? GOOGLE_FONTS : [{ family: preferredFont, scripts: [], mood: "user selected" }];
-        const result = await runClaudeDesigner({ apiKey: anthropicApiKey, model: anthropicModel, schema: designSchemaFor(allowedFonts),
+        const result = await runClaude({ apiKey: anthropicApiKey, model: anthropicModel, schema: designSchemaFor(allowedFonts),
+          toolName: "submit_design_spec", toolDescription: "Return the final production-ready LinkedIn design specification.",
           instructions: "You are Brand Visual Director, the third of three agents. Turn the approved LinkedIn content into a clear production-ready design specification. The approved content format is mandatory: use exactly content.recommendedFormat. Every design must have three explicit content roles: headline is the primary attention message, body is the supporting explanation, and footer is a short CTA, brand signature, or page cue. Apply the same headline/body/footer hierarchy to every carousel slide. Use this fixed 1080×1080 typography system: Headline: 84 px font size / 100 px line height — Bold. Body: 38 px font size / 56 px line height — Regular. Footer: 26 px font size / 36 px line height — Medium. Keep all essential content inside 90 px safe margins on every side. Choose typography only from the supplied Google Fonts catalog, considering language support, brand voice, and legibility. If preferredFont is not 'auto', use that exact font. Respect the supplied logo, palette, and content hierarchy. Keep Arabic text short and legible. Do not alter facts or add marketing claims. For single_image return an empty slides array; for carousel return 4-7 slides. Use only valid hex colors.",
           input: `Brand profile:\n${JSON.stringify(body.brandProfile)}\nApproved content:\n${JSON.stringify(body.content)}\nBrand kit:\n${JSON.stringify(body.brandKit)}\nAllowed Google Fonts:\n${JSON.stringify(fontOptions)}` });
         result.format = body.content?.recommendedFormat === "carousel" ? "carousel" : "single_image";
