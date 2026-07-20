@@ -141,7 +141,13 @@ function wrapText(value = "", limit = 24) {
 }
 
 function svgText({ text, x, y, size, lineHeight, weight, fill, anchor, maxLines, limit }) {
-  return wrapText(normalizePunctuation(text), limit).slice(0, maxLines).map((line, index) =>
+  const lines = wrapText(normalizePunctuation(text), limit);
+  const visible = lines.slice(0, maxLines);
+  if (lines.length > maxLines && visible.length) {
+    const last = visible[visible.length - 1].replace(/[،,.!؟?;؛:\s]+$/, "");
+    visible[visible.length - 1] = `${last}…`;
+  }
+  return visible.map((line, index) =>
     `<text x="${x}" y="${y + index * lineHeight}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}" direction="auto">${escapeXml(bidiSafe(line))}</text>`
   ).join("");
 }
@@ -377,7 +383,7 @@ function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, pa
     const numberY = variant === 0 ? 680 : 430;
     const numberSize = variant === 0 ? 300 : 320;
     const ruleY = variant === 0 ? 770 : 540;
-    const bodyY = variant === 0 ? 830 : 900;
+    const bodyY = variant === 0 ? 820 : 810;
     return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
       ${styleTag}
       <rect width="1080" height="1080" fill="${green}"/>
@@ -385,7 +391,7 @@ function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, pa
       ${svgText({ text: headline, x, y: headlineY, size: 38, lineHeight: 48, weight: 700, fill: textOnGreen, anchor, maxLines: 2, limit: 32 })}
       <text x="${x}" y="${numberY}" fill="${textOnGreen}" font-size="${numberSize}" font-weight="800" text-anchor="${anchor}" direction="ltr">${escapeXml(String(pageNumber || page))}</text>
       <line x1="90" y1="${ruleY}" x2="990" y2="${ruleY}" stroke="${textOnGreen}" stroke-opacity="0.3"/>
-      ${svgText({ text: body, x, y: bodyY, size: 30, lineHeight: 44, weight: 400, fill: textOnGreen, anchor, maxLines: 2, limit: 42 })}
+      ${svgText({ text: body, x, y: bodyY, size: 28, lineHeight: 40, weight: 400, fill: textOnGreen, anchor, maxLines: 4, limit: 46 })}
       ${footerBlock({ x, arabic, foreground: textOnGreen, pageNumber, page, category })}
     </svg>`;
   }
@@ -420,7 +426,7 @@ function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, pa
       <text x="990" y="205" fill="${labelColor}" font-size="24" font-weight="600" text-anchor="end" direction="auto">${escapeXml(preparedFooterCat)}</text>
       ${svgText({ text: headline, x: 990, y: 300, size: 70, lineHeight: 81, weight: 800, fill: textOnLight, anchor: "end", maxLines: 3, limit: 22 })}
       <line x1="90" y1="675" x2="990" y2="675" stroke="${textOnLight}" stroke-opacity="0.20"/>
-      ${svgText({ text: body, x: 990, y: 750, size: 34, lineHeight: 51, weight: 400, fill: textOnLight, anchor: "end", maxLines: 2, limit: 34 })}
+      ${svgText({ text: body, x: 990, y: 750, size: 30, lineHeight: 42, weight: 400, fill: textOnLight, anchor: "end", maxLines: 4, limit: 40 })}
       <text x="990" y="920" fill="${textOnLight}" fill-opacity="0.06" font-size="${ghostSize}" font-weight="800" text-anchor="end" direction="auto">${escapeXml(ghostWord)}</text>
       <line x1="90" y1="972" x2="990" y2="972" stroke="${textOnLight}" stroke-opacity="0.30"/>
       <text x="90" y="1022" fill="${textOnLight}" font-size="22" font-weight="600" text-anchor="start" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
@@ -433,7 +439,7 @@ function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, pa
     ${logoTag}
     <text x="990" y="205" fill="${labelColor}" font-size="24" font-weight="600" text-anchor="end" direction="auto">${escapeXml(preparedFooterCat)}</text>
     <text x="990" y="420" fill="${textOnLight}" fill-opacity="0.06" font-size="${ghostSize}" font-weight="800" text-anchor="end" direction="auto">${escapeXml(ghostWord)}</text>
-    ${svgText({ text: body, x: 990, y: 560, size: 34, lineHeight: 51, weight: 400, fill: textOnLight, anchor: "end", maxLines: 2, limit: 34 })}
+    ${svgText({ text: body, x: 990, y: 540, size: 30, lineHeight: 42, weight: 400, fill: textOnLight, anchor: "end", maxLines: 4, limit: 40 })}
     <line x1="90" y1="700" x2="990" y2="700" stroke="${textOnLight}" stroke-opacity="0.20"/>
     ${svgText({ text: headline, x: 990, y: 800, size: 70, lineHeight: 81, weight: 800, fill: textOnLight, anchor: "end", maxLines: 3, limit: 22 })}
     <line x1="90" y1="972" x2="990" y2="972" stroke="${textOnLight}" stroke-opacity="0.30"/>
