@@ -550,7 +550,7 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
   return <div className="orchestrator" dir="rtl" data-font-count={fontCatalog.length} data-font-source={fontCatalogSource}>
     <header className="app-header">
       <div className="product-mark"><span><Sparkle weight="fill" /></span><div><b>ثلاثة</b><small>استوديو محتوى بالذكاء الاصطناعي</small></div></div>
-      <div className="header-meta"><span className={apiStatus.writerConfigured ? "connected" : "offline"}>{apiStatus.writerConfigured ? `Claude · ${apiStatus.writerModel}` : "Claude غير متصل"}</span><button onClick={restart}>مشروع جديد</button></div>
+      <div className="header-meta"><span className={apiStatus.configured ? "connected" : "offline"}>{apiStatus.configured ? `Claude · ${apiStatus.model}` : "Claude غير متصل"}</span><button onClick={restart}>مشروع جديد</button></div>
     </header>
 
     <main>
@@ -559,7 +559,7 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
         <div className="privacy"><ShieldCheck size={20} /><span><b>لا ادعاءات مخترعة</b><small>المحتوى يعتمد على معلومات الشركة المعتمدة فقط.</small></span></div>
       </section>
 
-      {!apiStatus.loading && !apiStatus.configured && <section className="api-warning"><WarningCircle size={22} /><div><b>أضف مفتاح OpenAI لتشغيل الوكلاء الحقيقيين</b><p>أنشئ ملف <code>.env.local</code> داخل المشروع وأضف <code>OPENAI_API_KEY=...</code>، ثم أعد تشغيل التطبيق. المفتاح يبقى على الخادم ولا يصل إلى المتصفح.</p></div></section>}
+      {!apiStatus.loading && !apiStatus.configured && <section className="api-warning"><WarningCircle size={22} /><div><b>أضف مفتاح Claude لتشغيل الوكلاء الحقيقيين</b><p>أنشئ ملف <code>.env.local</code> داخل المشروع وأضف <code>ANTHROPIC_API_KEY=...</code>، ثم أعد تشغيل التطبيق. المفتاح يبقى على الخادم ولا يصل إلى المتصفح.</p></div></section>}
 
       <section className="agents-row">
         <AgentCard number="1" title="محلل الشركة" role="يقرأ الموقع ويبني ذاكرة موثّقة" icon={Globe} status={runs.analyst} active={agentActive === 1} />
