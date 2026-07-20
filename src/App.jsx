@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowLeft, ArrowRight, Brain, Check, Copy, DownloadSimple, Globe, ImageSquare,
+  ArrowLeft, ArrowRight, ArrowsClockwise, Brain, Check, Copy, DownloadSimple, Globe, ImageSquare,
   MagicWand, MagnifyingGlass, Palette, PencilSimple, ShieldCheck, Sparkle, UploadSimple, WarningCircle
 } from "@phosphor-icons/react";
 import { GOOGLE_FONTS, googleFontCssUrl } from "../shared/google-fonts.mjs";
@@ -8,16 +8,11 @@ import { GOOGLE_FONTS, googleFontCssUrl } from "../shared/google-fonts.mjs";
 const initialRuns = { analyst: "idle", writer: "idle", designer: "idle" };
 const defaultBrand = "";
 const embeddedFontCache = new Map();
-const PWP_MOTIFS = {
-  A: "Bold editorial: one oversized translucent word or letter at 6–10% opacity, one small colored tag, and one short separator rule. No other decoration.",
-  B: "Swiss grid: exactly two subtle grid lines at 8% opacity, a prominent corner page number, and a two-pixel side rule on the body. No other decoration.",
-  C: "Warm human: exactly two overlapping organic circles from the palette, one translucent quotation mark, and one circular avatar placeholder.",
-  D: "Dark premium: exactly two overlapping geometric green layers, one thin solid gold horizontal line, and one small brand signature.",
-  E: "Diagonal split: exactly one diagonal triangle separating two shades from the same color family. No additional visual element.",
-  F: "Big number anchor: one oversized translucent number at 8% opacity and one thin horizontal separator.",
-  G: "Inset frame: one one-pixel frame inset 20 px from the edges and one small centered signature at the bottom.",
-  H: "Layered typography: one small category label above the headline, one translucent ghost word in the background, and one thin top rule above the body."
+const MOTIF_LABELS = {
+  A: "الكلمة الجريئة", B: "الشبكة السويسرية", C: "الدفء الإنساني", D: "الفخامة الداكنة",
+  E: "القسمة القطرية", F: "الرقم الكبير", G: "الإطار الداخلي", H: "الطبقات الكتابية"
 };
+const ALL_MOTIFS = ["A", "B", "C", "D", "E", "F", "G", "H"];
 const MOTIF_OPTIONS = {
   hook: ["A", "H"], explanatory: ["B", "H"], quote: ["C", "G"], conclusion: ["D", "G"],
   comparison: ["E"], numbered: ["F"], statement: ["G", "A"], standard: ["H", "B"]
@@ -333,7 +328,6 @@ export function App() {
   const [content, setContent] = useState(null);
   const [editableContent, setEditableContent] = useState({ hook: "", post: "", cta: "" });
   const [design, setDesign] = useState(null);
-  const [canvaPrompt, setCanvaPrompt] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [customLogo, setCustomLogo] = useState("");
@@ -412,8 +406,6 @@ export function App() {
   function designPost() {
     setError(""); setRuns((r) => ({ ...r, designer: "running" }));
     const isCarousel = content?.recommendedFormat === "carousel";
-    const format = isCarousel ? "carousel" : "single LinkedIn post";
-    const direction = brief.language === "Arabic" ? "right-to-left Arabic layout" : "left-to-right English layout";
     const chosenFont = fontPreference === "auto" ? "Baloo Bhaijaan 2" : fontPreference;
     const rawPages = isCarousel ? (content.carouselSlides || []) : [{
       headline: content?.designCopy?.headline || limitWords(content?.hook || "", 8),
@@ -429,34 +421,35 @@ export function App() {
       };
     });
     const promptPages = assignMotifs(normalizedPages);
-    const contentBlock = promptPages.map((slide) => `PAGE ${slide.pageNumber} — MOTIF ${slide.motif} — ${slide.slideType.toUpperCase()}
-Motif lock: ${PWP_MOTIFS[slide.motif]}
-Headline: ${slide.headline}
-Body: ${slide.body}
-Footer category: ${slide.category}
-Footer page number: ${slide.pageNumber}`).join("\n\n");
-    const prompt = `You are a senior Canva designer applying the approved Post With Passion carousel design system. Create a polished ${format} for ${profile?.companyName || "the company"}.
-
-Canvas: 1080 × 1080 px per page.
-Language and direction: ${brief.language}; ${direction}.
-Brand colors: ${palette.join(", ")}.
-Typography: Use ${chosenFont}. Headline 64–72 px, bold, line-height 1.15. Body 32–36 px, regular, line-height 1.5. Footer and labels 22–26 px, medium, line-height 1.3.
-Grid: Maintain 90 px safe margins. Place the logo at the top right, approximately 40 px high and 60 px from the top and right, without changing its proportions. Headline begins around 30% of canvas height and uses no more than 70% width. Keep at least 250 px whitespace between headline and body. Body begins around 65% height and uses no more than 65% width. Add a one-pixel footer divider around 90% height. Below it, put the two-digit page number on the left and category on the right.
-Color rules: One solid background per page. No gradients. Use light text on dark backgrounds and the darkest palette color on light backgrounds. Use the beige/gold background on no more than one carousel page.
-
-APPROVED PAGE SPECIFICATIONS:
-${contentBlock}
-
-STRICT RULES: Use exactly the assigned motif on each page and only its listed visual elements. Never add icons, chat bubbles, illustrations, extra circles, extra lines, gradients, or decorative shapes. Never show the labels “Headline”, “Body”, “Footer”, “Motif”, or “Slide type”. Do not change approved copy or invent claims. Do not shrink type to fit more text. Keep one idea per page. Never repeat the same motif on consecutive pages. Make all elements editable in Canva.${isCarousel ? " Keep all pages visibly related through typography, footer, logo, spacing, and palette." : " Deliver one focused square composition."}`;
     const localPages = promptPages.map((pageData) => ({ ...pageData, footer: pageData.category }));
     if (isCarousel) {
-      setDesign({ format: "carousel", concept: "PWP Motif System — A–H", imageDirection: "Pixel-stable local preview based on the approved design system.", palette, typography: { fontFamily: chosenFont }, slides: localPages });
+      setDesign({ format: "carousel", concept: "PWP Motif System — A–H", palette, typography: { fontFamily: chosenFont }, slides: localPages });
     } else {
       const pageData = localPages[0];
-      setDesign({ format: "single_image", concept: `PWP Motif ${pageData.motif}`, imageDirection: "Pixel-stable local preview based on the approved design system.", palette, typography: { fontFamily: chosenFont }, slides: [], ...pageData });
+      setDesign({ format: "single_image", concept: `PWP Motif ${pageData.motif}`, palette, typography: { fontFamily: chosenFont }, slides: [], ...pageData });
     }
-    setCanvaPrompt(prompt);
     setRuns((r) => ({ ...r, designer: "done" }));
+  }
+
+  function updateSlideField(index, field, value) {
+    setDesign((prev) => {
+      if (!prev) return prev;
+      if (prev.format === "carousel") {
+        return { ...prev, slides: prev.slides.map((s, i) => (i === index ? { ...s, [field]: value } : s)) };
+      }
+      return { ...prev, [field]: value };
+    });
+  }
+
+  function cycleMotif(index) {
+    setDesign((prev) => {
+      if (!prev) return prev;
+      const next = (motif) => ALL_MOTIFS[(ALL_MOTIFS.indexOf(motif) + 1) % ALL_MOTIFS.length];
+      if (prev.format === "carousel") {
+        return { ...prev, slides: prev.slides.map((s, i) => (i === index ? { ...s, motif: next(s.motif) } : s)) };
+      }
+      return { ...prev, motif: next(prev.motif) };
+    });
   }
 
   function uploadLogo(event) {
@@ -469,15 +462,9 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
   }
 
   function restart() {
-    setStage(1); setRuns(initialRuns); setProfile(null); setContent(null); setDesign(null); setCanvaPrompt(""); setError("");
+    setStage(1); setRuns(initialRuns); setProfile(null); setContent(null); setDesign(null); setError("");
     setEditableContent({ hook: "", post: "", cta: "" });
     setBrief({ language: "Arabic", goal: "بناء الثقة والوعي", dialect: "العربية السعودية", format: "single_image", note: "", styleExamples: "" });
-  }
-
-  async function openCanvaWithPrompt() {
-    if (!canvaPrompt) return;
-    await copyValue(canvaPrompt, "تم نسخ برومبت Canva");
-    window.open("https://www.canva.com/ai/", "_blank", "noopener,noreferrer");
   }
 
   async function copyValue(value, message) {
@@ -505,17 +492,6 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
     }
     setNotice(design.format === "carousel" ? "تم تحميل صفحات الكاروسيل PNG" : "تم تحميل التصميم PNG");
     setTimeout(() => setNotice(""), 1800);
-  }
-
-  function openInCanva() {
-    if (!design || !previewSvgs.length) return;
-    const canvaTab = window.open("https://www.canva.com/create/instagram-posts/", "_blank", "noopener,noreferrer");
-    previewSvgs.forEach((svg, index) => {
-      downloadBlob(svg, `${profile?.companyName || "linkedin"}-canva-${index + 1}.svg`);
-    });
-    if (!canvaTab) setError("المتصفح منع فتح Canva. اسمح بالنوافذ المنبثقة ثم جرّب مجددًا.");
-    setNotice(design.format === "carousel" ? "تم تنزيل صفحات SVG — ارفعها داخل Canva" : "تم تنزيل SVG — ارفعه داخل Canva");
-    setTimeout(() => setNotice(""), 3200);
   }
 
   const agentActive = runs.designer === "running" || stage === 3 ? 3 : runs.writer === "running" || stage === 2 || stage === 4 ? 2 : 1;
@@ -566,7 +542,7 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
         <ArrowLeft className="agent-arrow" size={21} />
         <AgentCard number="2" title="كاتب المحتوى" role="يختار الزاوية ويكتب بصوت العلامة" icon={PencilSimple} status={runs.writer} active={agentActive === 2} />
         <ArrowLeft className="agent-arrow" size={21} />
-        <AgentCard number="3" title="محرك التصميم" role="يقسم المحتوى، يطبّق الموتيف، ويجهّز Canva" icon={Palette} status={runs.designer} active={agentActive === 3} />
+        <AgentCard number="3" title="محرك التصميم" role="يرسم كل صفحة مباشرة بموتيفها الفعلي" icon={Palette} status={runs.designer} active={agentActive === 3} />
       </section>
 
       {error && <div className="error-banner"><WarningCircle size={18} />{error}<button onClick={() => setError("")}>×</button></div>}
@@ -638,7 +614,7 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
       {stage === 3 && <section className="stage-grid design-stage">
         <div className="work-panel">
           <button className="back" onClick={() => setStage(2)}><ArrowRight /> المحتوى</button>
-          <div className="stage-title"><span>03</span><div><h2>ولّد التصميم بنظام PWP</h2><p>معاينة ثابتة بالموتيف H وبرومبت Canva منضبط بمكتبة الموتيفات المعتمدة.</p></div></div>
+          <div className="stage-title"><span>03</span><div><h2>ولّد التصميم بنظام PWP</h2><p>يترسم مباشرة بالكود لكل صفحة بموتيفها — عدّل النص أو بدّل الموتيف مباشرة من المعاينة.</p></div></div>
           <label>اللوغو</label><label className="logo-control"><input type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={uploadLogo} /><img src={logo} alt="اللوغو" /><span><UploadSimple /> رفع أو تغيير اللوغو</span></label>
           <label>ألوان الهوية</label><div className="palette-control">{palette.map((color, i) => <label key={`${color}-${i}`}><input type="color" value={color} onChange={(e) => setPalette(palette.map((c, n) => n === i ? e.target.value : c))} /><span style={{ background: color }} /></label>)}</div>
           <label>خط Google Fonts</label>
@@ -653,20 +629,40 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
             </div>
             <div className="font-preview" style={{ fontFamily: `'${previewFont}', sans-serif` }}><span>{previewFont}</span><b>فكرة واضحة، بتصميم يليق بعلامتك.</b></div>
           </div>
-          <button className="run-agent" onClick={designPost} disabled={!content}><ImageSquare weight="fill" /> إنشاء المعاينة وبرومبت Canva</button>
+          <button className="run-agent" onClick={designPost} disabled={!content}><ImageSquare weight="fill" /> إنشاء التصميم</button>
         </div>
         <div className="result-panel design-result">
-          {!canvaPrompt ? <EmptyAgent icon={Palette} title="التصميم سيظهر هنا" text="اضبط الهوية والخط، ثم أنشئ معاينة الموتيف H وبرومبت Canva." /> : <>
-            <div className="design-meta"><div><span>نظام الموتيفات · A–H</span><h2>معاينة حقيقية لكل صفحة بموتيفها الفعلي</h2><p>كل صفحة تترسم محليًا بنفس الموتيف المعتمد لها — مو معاينة عامة تُستبدل لاحقًا داخل Canva.</p></div><b>{content?.recommendedFormat === "carousel" ? `${content.carouselSlides?.length || 0} صفحات` : "صورة واحدة"} · 1080 × 1080</b></div>
-            {previewRendering || !previewPngs.length ? <div className="preview-loading"><i /> جاري تجهيز معاينة PWP المطابقة للتنزيل...</div> : design?.format === "carousel" ? <div className="slides-preview canonical-slides">{previewPngs.map((src, i) => <article key={`pwp-preview-${i}`}><img src={src} alt={`معاينة الصفحة ${i + 1}`} /></article>)}</div> : <div className="canonical-preview"><img src={previewPngs[0]} alt="معاينة التصميم" /></div>}
+          {!design ? <EmptyAgent icon={Palette} title="التصميم سيظهر هنا" text="اضبط الهوية والخط، ثم أنشئ التصميم." /> : <>
+            <div className="design-meta"><div><span>نظام الموتيفات · A–H</span><h2>معاينة حقيقية لكل صفحة بموتيفها الفعلي</h2><p>عدّل العنوان أو النص مباشرة تحت كل صفحة، أو بدّل الموتيف بزر واحد.</p></div><b>{content?.recommendedFormat === "carousel" ? `${content.carouselSlides?.length || 0} صفحات` : "صورة واحدة"} · 1080 × 1080</b></div>
+            {previewRendering || !previewPngs.length ? <div className="preview-loading"><i /> جاري تجهيز معاينة PWP المطابقة للتنزيل...</div> : design?.format === "carousel" ? (
+              <div className="slides-preview canonical-slides editable-slides">
+                {design.slides.map((slide, i) => (
+                  <article key={`pwp-preview-${i}`}>
+                    <img src={previewPngs[i]} alt={`معاينة الصفحة ${i + 1}`} />
+                    <div className="slide-editor-controls">
+                      <button className="motif-switch" onClick={() => cycleMotif(i)}><ArrowsClockwise /> {MOTIF_LABELS[slide.motif] || slide.motif}</button>
+                      <textarea rows={1} value={slide.headline} onChange={(e) => updateSlideField(i, "headline", e.target.value)} placeholder="العنوان" />
+                      <textarea rows={2} value={slide.body} onChange={(e) => updateSlideField(i, "body", e.target.value)} placeholder="النص" />
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="canonical-preview editable-slides">
+                <img src={previewPngs[0]} alt="معاينة التصميم" />
+                <div className="slide-editor-controls">
+                  <button className="motif-switch" onClick={() => cycleMotif(0)}><ArrowsClockwise /> {MOTIF_LABELS[design.motif] || design.motif}</button>
+                  <textarea rows={1} value={design.headline} onChange={(e) => updateSlideField(0, "headline", e.target.value)} placeholder="العنوان" />
+                  <textarea rows={2} value={design.body} onChange={(e) => updateSlideField(0, "body", e.target.value)} placeholder="النص" />
+                </div>
+              </div>
+            )}
             <div className="design-actions phase-one-actions"><button onClick={downloadDesign} disabled={fontEmbedding || !embeddedFontCss || previewRendering}><DownloadSimple weight="bold" /> SVG</button><button className="approve" onClick={downloadDesignPng} disabled={fontEmbedding || !embeddedFontCss || previewRendering}><DownloadSimple weight="bold" /> تحميل PNG</button></div>
-            <article className="canva-prompt-card"><div><span>برومبت التصميم</span><button onClick={() => copyValue(canvaPrompt, "تم نسخ برومبت Canva")}><Copy /> نسخ</button></div><pre>{canvaPrompt}</pre></article>
             <div className="delivery-grid">
               <article><div><span>كابشن المنشور</span><button onClick={() => copyValue(captionText, "تم نسخ الكابشن")}><Copy /> نسخ</button></div><p>{captionText}</p></article>
               <article><div><span>الهاشتاغات المقترحة</span><button onClick={() => copyValue(hashtagText, "تم نسخ الهاشتاغات")}><Copy /> نسخ</button></div><p className="delivery-hashtags">{hashtagText}</p></article>
             </div>
-            <div className="canva-handoff"><b>الخطوة التالية</b><span>انسخ البرومبت، افتح Canva AI، الصقه، ثم ارفع اللوغو واختر النتيجة الأفضل.</span></div>
-            <div className="design-actions"><button onClick={() => setStage(2)}><PencilSimple /> تعديل المحتوى</button><button className="canva-action" onClick={openCanvaWithPrompt}><span className="canva-mark">C</span> نسخ وفتح Canva</button></div>
+            <div className="design-actions"><button onClick={() => setStage(2)}><PencilSimple /> تعديل المحتوى</button></div>
           </>}
         </div>
       </section>}
