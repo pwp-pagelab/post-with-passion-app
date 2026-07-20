@@ -550,7 +550,7 @@ STRICT RULES: Use exactly the assigned motif on each page and only its listed vi
   return <div className="orchestrator" dir="rtl" data-font-count={fontCatalog.length} data-font-source={fontCatalogSource}>
     <header className="app-header">
       <div className="product-mark"><span><Sparkle weight="fill" /></span><div><b>ثلاثة</b><small>استوديو محتوى بالذكاء الاصطناعي</small></div></div>
-      <div className="header-meta"><span className={apiStatus.configured ? "connected" : "offline"}>{apiStatus.configured ? `OpenAI · ${apiStatus.model}` : "OpenAI غير متصل"}</span><button onClick={restart}>مشروع جديد</button></div>
+      <div className="header-meta"><span className={apiStatus.writerConfigured ? "connected" : "offline"}>{apiStatus.writerConfigured ? `Claude · ${apiStatus.writerModel}` : "Claude غير متصل"}</span><button onClick={restart}>مشروع جديد</button></div>
     </header>
 
     <main>
