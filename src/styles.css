@@ -20,7 +20,8 @@
 .alt-angles button:hover{border-color:var(--green)}
 .alt-angles button span{font-size:7px;color:var(--green);white-space:nowrap;flex-shrink:0}
 .alt-angles button:disabled{opacity:.5;cursor:not-allowed}
-.editable-slides.canonical-preview{display:flex;flex-direction:column;gap:8px}
+.editable-slides.canonical-preview{display:flex;flex-direction:column;gap:8px;aspect-ratio:auto;overflow:visible}
+.editable-slides.canonical-preview>img{aspect-ratio:1/1;height:auto}
 .canonical-slides.editable-slides{align-items:flex-start}
 .canonical-slides.editable-slides article{min-width:230px;display:flex;flex-direction:column;gap:6px;aspect-ratio:auto}
 .canonical-slides.editable-slides article>img{aspect-ratio:1/1;border-radius:9px}
