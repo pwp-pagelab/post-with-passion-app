@@ -15,7 +15,7 @@ const MOTIF_LABELS = {
 const ALL_MOTIFS = ["A", "B", "C", "D", "E", "F", "G", "H"];
 const MOTIF_OPTIONS = {
   hook: ["A", "H"], explanatory: ["B", "H"], quote: ["C", "G"], conclusion: ["D", "G"],
-  comparison: ["E"], numbered: ["F"], statement: ["G", "A"], standard: ["H", "B"]
+  comparison: ["E", "D"], numbered: ["F", "B"], statement: ["G", "A"], standard: ["H", "B"]
 };
 const CATEGORY_BY_TYPE = { hook: "فكرة أساسية", explanatory: "شرح الفكرة", quote: "صوت إنساني", conclusion: "الخلاصة", comparison: "مقارنة", numbered: "خطوات عملية", statement: "رسالة أساسية", standard: "فكرة أساسية" };
 
@@ -373,19 +373,19 @@ function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, pa
 
   if (motif === "F") {
     const textOnGreen = onColor(green);
-    const headlineY = variant === 0 ? 260 : 720;
-    const numberY = variant === 0 ? 640 : 400;
-    const numberSize = variant === 0 ? 340 : 380;
-    const ruleY = variant === 0 ? 740 : 500;
-    const bodyY = variant === 0 ? 800 : 900;
+    const headlineY = variant === 0 ? 210 : 720;
+    const numberY = variant === 0 ? 680 : 430;
+    const numberSize = variant === 0 ? 300 : 320;
+    const ruleY = variant === 0 ? 770 : 540;
+    const bodyY = variant === 0 ? 830 : 900;
     return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
       ${styleTag}
       <rect width="1080" height="1080" fill="${green}"/>
       ${logoTag}
-      ${svgText({ text: headline, x, y: headlineY, size: variant === 0 ? 40 : 44, lineHeight: 52, weight: 700, fill: textOnGreen, anchor, maxLines: 2, limit: 30 })}
+      ${svgText({ text: headline, x, y: headlineY, size: 38, lineHeight: 48, weight: 700, fill: textOnGreen, anchor, maxLines: 2, limit: 32 })}
       <text x="${x}" y="${numberY}" fill="${textOnGreen}" font-size="${numberSize}" font-weight="800" text-anchor="${anchor}" direction="ltr">${escapeXml(String(pageNumber || page))}</text>
       <line x1="90" y1="${ruleY}" x2="990" y2="${ruleY}" stroke="${textOnGreen}" stroke-opacity="0.3"/>
-      ${svgText({ text: body, x, y: bodyY, size: 32, lineHeight: 46, weight: 400, fill: textOnGreen, anchor, maxLines: 2, limit: 40 })}
+      ${svgText({ text: body, x, y: bodyY, size: 30, lineHeight: 44, weight: 400, fill: textOnGreen, anchor, maxLines: 2, limit: 42 })}
       ${footerBlock({ x, arabic, foreground: textOnGreen, pageNumber, page, category })}
     </svg>`;
   }
@@ -658,7 +658,13 @@ export function App() {
   const agentActive = runs.designer === "running" || stage === 3 ? 3 : runs.writer === "running" || stage === 2 || stage === 4 ? 2 : 1;
   const slides = useMemo(() => design?.slides?.length ? design.slides : content?.carouselSlides || [], [design, content]);
   const designPages = useMemo(() => design?.format === "carousel" ? slides : design ? [{ headline: design.headline, body: design.body, footer: design.footer, category: design.category, motif: design.motif, pageNumber: design.pageNumber }] : [], [design, slides]);
-  const designText = useMemo(() => designPages.map((page) => `${page.headline || ""} ${page.body || ""} ${page.footer || ""} ${page.category || ""}`).join(" ").trim(), [designPages]);
+  const designText = useMemo(() => {
+    const contentText = designPages.map((page) => `${page.headline || ""} ${page.body || ""} ${page.footer || ""} ${page.category || ""}`).join(" ").trim();
+    // Always request full digit coverage (and the smart-quote glyph used by one motif) regardless of
+    // what happens to appear in the copy — otherwise whichever slide's own text doesn't contain a
+    // given digit falls back to a different system font just for its page number / big-number motif.
+    return `${contentText} 0123456789 ”`.trim();
+  }, [designPages]);
 
   useEffect(() => {
     let active = true;
