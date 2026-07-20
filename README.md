@@ -6,7 +6,7 @@ Three-stage workflow for company analysis, LinkedIn copywriting, and PWP design-
 
 1. Install Node.js 20+ and pnpm.
 2. Copy .env.example to .env.local.
-3. Add your OpenAI API key to .env.local.
+3. Add your Anthropic API key to .env.local.
 4. Run: pnpm install, then pnpm dev.
 
 Never commit .env.local or API keys to GitHub.
