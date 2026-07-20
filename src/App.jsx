@@ -55,6 +55,78 @@ function bidiSafe(value = "") {
   return text.replace(/([0-9]+)/g, "\u200F$1\u200F");
 }
 
+function normalizePunctuation(value = "") {
+  let text = String(value);
+  const arabic = /[\u0600-\u06FF]/.test(text);
+  // never a space before a punctuation mark — that's what makes commas/periods
+  // wrap onto their own line and look illogical
+  text = text.replace(/\s+([,،.!؟?;؛:])/g, "$1");
+  // collapse doubled punctuation from generation slip-ups
+  text = text.replace(/([،,])\1+/g, "$1").replace(/\.{2,}(?!\.\.\.)/g, ".");
+  if (arabic) {
+    // Arabic sentences use Arabic-shaped punctuation, not the Western glyphs
+    text = text.replace(/,/g, "،").replace(/\?/g, "؟").replace(/;/g, "؛");
+  }
+  // exactly one space after a punctuation mark when more text follows
+  text = text.replace(/([،,.!؟?;؛:])(?=\S)/g, "$1 ");
+  return text.trim();
+}
+
+function prepareText(value = "") {
+  return bidiSafe(normalizePunctuation(value));
+}
+
+function hexToRgb(hex) {
+  const clean = String(hex).replace("#", "").trim();
+  const full = clean.length === 3 ? clean.split("").map((ch) => ch + ch).join("") : clean.padEnd(6, "0").slice(0, 6);
+  const num = parseInt(full, 16) || 0;
+  return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+}
+
+function relativeLuminance(hex) {
+  const { r, g, b } = hexToRgb(hex);
+  const lin = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+function contrastRatio(hexA, hexB) {
+  const La = relativeLuminance(hexA), Lb = relativeLuminance(hexB);
+  const [light, darkL] = La > Lb ? [La, Lb] : [Lb, La];
+  return (light + 0.05) / (darkL + 0.05);
+}
+
+// Picks the best-contrast color for text/lines against a given background,
+// preferring on-brand palette colors and only falling back to plain
+// white/black when nothing in the palette reads clearly enough (WCAG AA ~4.5).
+function bestOn(bgHex, candidates) {
+  const pool = candidates.filter((c) => c && c.toLowerCase() !== String(bgHex).toLowerCase());
+  let best = pool[0] || "#FFFFFF", bestRatio = -1;
+  for (const c of pool) {
+    const ratio = contrastRatio(bgHex, c);
+    if (ratio > bestRatio) { bestRatio = ratio; best = c; }
+  }
+  if (bestRatio < 4.5) {
+    const white = "#FFFFFF", black = "#111111";
+    best = contrastRatio(bgHex, white) >= contrastRatio(bgHex, black) ? white : black;
+  }
+  return best;
+}
+
+// Deterministic per-post seed so the "same" motif renders as a genuinely
+// different execution for every client and every post, instead of a fixed
+// pixel-identical template.
+function seedFromString(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i += 1) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function seededRandom(seed) {
+  let s = seed % 2147483647;
+  if (s <= 0) s += 2147483646;
+  return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
+}
+function jitter(rand, min, max) { return min + rand() * (max - min); }
+
 function wrapText(value = "", limit = 24) {
   const words = String(value).trim().split(/\s+/).filter(Boolean);
   const lines = [];
@@ -69,7 +141,7 @@ function wrapText(value = "", limit = 24) {
 }
 
 function svgText({ text, x, y, size, lineHeight, weight, fill, anchor, maxLines, limit }) {
-  return wrapText(text, limit).slice(0, maxLines).map((line, index) =>
+  return wrapText(normalizePunctuation(text), limit).slice(0, maxLines).map((line, index) =>
     `<text x="${x}" y="${y + index * lineHeight}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}" direction="auto">${escapeXml(bidiSafe(line))}</text>`
   ).join("");
 }
@@ -152,7 +224,7 @@ async function makeDesignPngBlob({ headline, body, footer, palette, font, logo, 
 function footerBlock({ x, arabic, foreground, pageNumber, page, category }) {
   return `<line x1="90" y1="972" x2="990" y2="972" stroke="${foreground}" stroke-opacity="0.25"/>
     <text x="${arabic ? 90 : 990}" y="1022" fill="${foreground}" font-size="22" font-weight="600" text-anchor="${arabic ? "start" : "end"}" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
-    <text x="${arabic ? 990 : 90}" y="1022" fill="${foreground}" font-size="22" font-weight="600" text-anchor="${arabic ? "end" : "start"}" direction="auto">${escapeXml(bidiSafe(category || ""))}</text>`;
+    <text x="${arabic ? 990 : 90}" y="1022" fill="${foreground}" font-size="22" font-weight="600" text-anchor="${arabic ? "end" : "start"}" direction="auto">${escapeXml(prepareText(category || ""))}</text>`;
 }
 
 function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, palette, font, fontCss = "", logo, page = 1 }) {
@@ -160,6 +232,8 @@ function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, pa
   const green = palette[1] || "#168164";
   const gold = palette[2] || "#D7C196";
   const light = palette[3] || "#F5F1E8";
+  const onColor = (bgHex) => bestOn(bgHex, palette);
+  const rand = seededRandom(seedFromString(`${headline}|${category}|${motif}|${page}`));
   const arabic = /[\u0600-\u06FF]/.test(`${headline} ${body} ${footer}`);
   const x = arabic ? 990 : 90;
   const anchor = arabic ? "end" : "start";
@@ -167,117 +241,138 @@ function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, pa
   const styleTag = `<style>${fontStyles} text{font-family:'${escapeXml(font)}',Arial,sans-serif}</style>`;
   const logoTag = logo ? `<image href="${escapeXml(logo)}" x="${arabic ? 830 : 90}" y="60" width="190" height="40" preserveAspectRatio="${arabic ? "xMaxYMid" : "xMinYMid"} meet"/>` : "";
   const ghostWord = words(headline).slice(0, 1).join("") || "PWP";
+  const preparedCategory = prepareText(category || "");
+  const preparedFooterCat = prepareText(footer || category || "");
 
   if (motif === "A") {
+    const textOnDark = onColor(dark);
+    const rulePct = jitter(rand, 0.22, 0.32);
     return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
       ${styleTag}
       <rect width="1080" height="1080" fill="${dark}"/>
-      <text x="${x}" y="640" fill="${light}" fill-opacity="0.08" font-size="620" font-weight="800" text-anchor="${anchor}" direction="auto">${escapeXml(ghostWord)}</text>
+      <text x="${x}" y="640" fill="${textOnDark}" fill-opacity="0.08" font-size="${Math.round(jitter(rand, 560, 660))}" font-weight="800" text-anchor="${anchor}" direction="auto">${escapeXml(ghostWord)}</text>
       ${logoTag}
       <rect x="${arabic ? 900 : 90}" y="150" width="90" height="34" rx="17" fill="${gold}"/>
-      <text x="${arabic ? 945 : 135}" y="173" fill="${dark}" font-size="16" font-weight="700" text-anchor="middle">${escapeXml(bidiSafe(category || ""))}</text>
-      ${svgText({ text: headline, x, y: 340, size: 78, lineHeight: 92, weight: 800, fill: light, anchor, maxLines: 3, limit: 20 })}
-      <line x1="90" y1="640" x2="${arabic ? 300 : 990}" y2="640" stroke="${gold}" stroke-width="4"/>
-      ${footerBlock({ x, arabic, foreground: light, pageNumber, page, category })}
+      <text x="${arabic ? 945 : 135}" y="173" fill="${onColor(gold)}" font-size="16" font-weight="700" text-anchor="middle">${escapeXml(preparedCategory)}</text>
+      ${svgText({ text: headline, x, y: 340, size: 78, lineHeight: 92, weight: 800, fill: textOnDark, anchor, maxLines: 3, limit: 20 })}
+      <line x1="90" y1="${Math.round(1080 * rulePct)}" x2="${arabic ? 300 : 990}" y2="${Math.round(1080 * rulePct)}" stroke="${gold}" stroke-width="4"/>
+      ${footerBlock({ x, arabic, foreground: textOnDark, pageNumber, page, category })}
     </svg>`;
   }
 
   if (motif === "B") {
+    const textOnLight = onColor(light);
+    const line1 = Math.round(jitter(rand, 320, 400));
+    const line2 = Math.round(jitter(rand, 680, 760));
     return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
       ${styleTag}
       <rect width="1080" height="1080" fill="${light}"/>
-      <line x1="0" y1="360" x2="1080" y2="360" stroke="${dark}" stroke-opacity="0.08"/>
-      <line x1="0" y1="720" x2="1080" y2="720" stroke="${dark}" stroke-opacity="0.08"/>
+      <line x1="0" y1="${line1}" x2="1080" y2="${line1}" stroke="${textOnLight}" stroke-opacity="0.08"/>
+      <line x1="0" y1="${line2}" x2="1080" y2="${line2}" stroke="${textOnLight}" stroke-opacity="0.08"/>
       ${logoTag}
-      <text x="${arabic ? 90 : 990}" y="130" fill="${dark}" fill-opacity="0.18" font-size="90" font-weight="800" text-anchor="${arabic ? "start" : "end"}" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
-      ${svgText({ text: headline, x, y: 420, size: 68, lineHeight: 82, weight: 700, fill: dark, anchor, maxLines: 3, limit: 22 })}
+      <text x="${arabic ? 90 : 990}" y="130" fill="${textOnLight}" fill-opacity="0.18" font-size="90" font-weight="800" text-anchor="${arabic ? "start" : "end"}" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
+      ${svgText({ text: headline, x, y: 420, size: 68, lineHeight: 82, weight: 700, fill: textOnLight, anchor, maxLines: 3, limit: 22 })}
       <rect x="${arabic ? 984 : 90}" y="560" width="6" height="220" fill="${green}"/>
-      ${svgText({ text: body, x: arabic ? 964 : 110, y: 600, size: 34, lineHeight: 50, weight: 400, fill: dark, anchor, maxLines: 4, limit: 38 })}
-      ${footerBlock({ x, arabic, foreground: dark, pageNumber, page, category })}
+      ${svgText({ text: body, x: arabic ? 964 : 110, y: 600, size: 34, lineHeight: 50, weight: 400, fill: textOnLight, anchor, maxLines: 4, limit: 38 })}
+      ${footerBlock({ x, arabic, foreground: textOnLight, pageNumber, page, category })}
     </svg>`;
   }
 
   if (motif === "C") {
+    const textOnGold = onColor(gold);
+    const cx1 = arabic ? Math.round(jitter(rand, 860, 940)) : Math.round(jitter(rand, 140, 220));
+    const r1 = Math.round(jitter(rand, 130, 165));
     return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
       ${styleTag}
       <rect width="1080" height="1080" fill="${gold}"/>
-      <circle cx="${arabic ? 900 : 180}" cy="230" r="150" fill="${green}" fill-opacity="0.35"/>
+      <circle cx="${cx1}" cy="230" r="${r1}" fill="${green}" fill-opacity="0.35"/>
       <circle cx="${arabic ? 820 : 260}" cy="330" r="100" fill="${dark}" fill-opacity="0.25"/>
       <circle cx="${arabic ? 860 : 220}" cy="280" r="46" fill="${light}"/>
       ${logoTag}
-      <text x="${x}" y="430" fill="${dark}" fill-opacity="0.18" font-size="150" font-weight="800" text-anchor="${anchor}" direction="ltr">”</text>
-      ${svgText({ text: headline, x, y: 560, size: 62, lineHeight: 78, weight: 700, fill: dark, anchor, maxLines: 3, limit: 22 })}
-      ${svgText({ text: body, x, y: 780, size: 34, lineHeight: 50, weight: 400, fill: dark, anchor, maxLines: 3, limit: 38 })}
-      ${footerBlock({ x, arabic, foreground: dark, pageNumber, page, category })}
+      <text x="${x}" y="430" fill="${textOnGold}" fill-opacity="0.18" font-size="150" font-weight="800" text-anchor="${anchor}" direction="ltr">”</text>
+      ${svgText({ text: headline, x, y: 560, size: 62, lineHeight: 78, weight: 700, fill: textOnGold, anchor, maxLines: 3, limit: 22 })}
+      ${svgText({ text: body, x, y: 780, size: 34, lineHeight: 50, weight: 400, fill: textOnGold, anchor, maxLines: 3, limit: 38 })}
+      ${footerBlock({ x, arabic, foreground: textOnGold, pageNumber, page, category })}
     </svg>`;
   }
 
   if (motif === "D") {
+    const textOnDark = onColor(dark);
+    const rot1 = Math.round(jitter(rand, 12, 24));
+    const rot2 = -Math.round(jitter(rand, 8, 18));
     return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
       ${styleTag}
       <rect width="1080" height="1080" fill="${dark}"/>
-      <rect x="${arabic ? 560 : -120}" y="-80" width="640" height="640" fill="${green}" fill-opacity="0.55" transform="rotate(18 ${arabic ? 880 : 200} 240)"/>
-      <rect x="${arabic ? 460 : -60}" y="40" width="500" height="500" fill="${green}" fill-opacity="0.35" transform="rotate(-12 ${arabic ? 780 : 260} 300)"/>
+      <rect x="${arabic ? 560 : -120}" y="-80" width="640" height="640" fill="${green}" fill-opacity="0.55" transform="rotate(${rot1} ${arabic ? 880 : 200} 240)"/>
+      <rect x="${arabic ? 460 : -60}" y="40" width="500" height="500" fill="${green}" fill-opacity="0.35" transform="rotate(${rot2} ${arabic ? 780 : 260} 300)"/>
       ${logoTag}
-      ${svgText({ text: headline, x, y: 480, size: 72, lineHeight: 86, weight: 700, fill: light, anchor, maxLines: 3, limit: 20 })}
+      ${svgText({ text: headline, x, y: 480, size: 72, lineHeight: 86, weight: 700, fill: textOnDark, anchor, maxLines: 3, limit: 20 })}
       <line x1="90" y1="620" x2="990" y2="620" stroke="${gold}" stroke-width="2"/>
-      ${svgText({ text: body, x, y: 690, size: 34, lineHeight: 50, weight: 400, fill: light, anchor, maxLines: 3, limit: 38 })}
-      ${footerBlock({ x, arabic, foreground: light, pageNumber, page, category })}
+      ${svgText({ text: body, x, y: 690, size: 34, lineHeight: 50, weight: 400, fill: textOnDark, anchor, maxLines: 3, limit: 38 })}
+      ${footerBlock({ x, arabic, foreground: textOnDark, pageNumber, page, category })}
     </svg>`;
   }
 
   if (motif === "E") {
+    const textOnLight = onColor(light);
+    const textOnGreen = onColor(green);
+    const splitShift = Math.round(jitter(rand, -120, 120));
     return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
       ${styleTag}
       <rect width="1080" height="1080" fill="${light}"/>
-      <polygon points="${arabic ? "1080,0 1080,1080 300,1080" : "0,0 0,1080 780,1080"}" fill="${green}"/>
+      <polygon points="${arabic ? `1080,0 1080,1080 ${300 + splitShift},1080` : `0,0 0,1080 ${780 + splitShift},1080`}" fill="${green}"/>
       ${logoTag}
-      ${svgText({ text: headline, x: arabic ? 990 : 90, y: 300, size: 66, lineHeight: 80, weight: 700, fill: dark, anchor, maxLines: 3, limit: 20 })}
-      ${svgText({ text: body, x: arabic ? 940 : 140, y: 780, size: 34, lineHeight: 50, weight: 400, fill: light, anchor, maxLines: 3, limit: 34 })}
-      ${footerBlock({ x, arabic, foreground: dark, pageNumber, page, category })}
+      ${svgText({ text: headline, x: arabic ? 990 : 90, y: 300, size: 66, lineHeight: 80, weight: 700, fill: textOnLight, anchor, maxLines: 3, limit: 20 })}
+      ${svgText({ text: body, x: arabic ? 940 : 140, y: 780, size: 34, lineHeight: 50, weight: 400, fill: textOnGreen, anchor, maxLines: 3, limit: 34 })}
+      ${footerBlock({ x, arabic, foreground: textOnLight, pageNumber, page, category })}
     </svg>`;
   }
 
   if (motif === "F") {
+    const textOnGreen = onColor(green);
     return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
       ${styleTag}
       <rect width="1080" height="1080" fill="${green}"/>
       ${logoTag}
-      ${svgText({ text: headline, x, y: 260, size: 40, lineHeight: 52, weight: 700, fill: light, anchor, maxLines: 2, limit: 30 })}
-      <text x="${x}" y="640" fill="${light}" font-size="340" font-weight="800" text-anchor="${anchor}" direction="ltr">${escapeXml(String(pageNumber || page))}</text>
-      <line x1="90" y1="740" x2="990" y2="740" stroke="${light}" stroke-opacity="0.3"/>
-      ${svgText({ text: body, x, y: 800, size: 32, lineHeight: 46, weight: 400, fill: light, anchor, maxLines: 2, limit: 40 })}
-      ${footerBlock({ x, arabic, foreground: light, pageNumber, page, category })}
+      ${svgText({ text: headline, x, y: 260, size: 40, lineHeight: 52, weight: 700, fill: textOnGreen, anchor, maxLines: 2, limit: 30 })}
+      <text x="${x}" y="640" fill="${textOnGreen}" font-size="340" font-weight="800" text-anchor="${anchor}" direction="ltr">${escapeXml(String(pageNumber || page))}</text>
+      <line x1="90" y1="740" x2="990" y2="740" stroke="${textOnGreen}" stroke-opacity="0.3"/>
+      ${svgText({ text: body, x, y: 800, size: 32, lineHeight: 46, weight: 400, fill: textOnGreen, anchor, maxLines: 2, limit: 40 })}
+      ${footerBlock({ x, arabic, foreground: textOnGreen, pageNumber, page, category })}
     </svg>`;
   }
 
   if (motif === "G") {
+    const textOnDark = onColor(dark);
+    const inset = Math.round(jitter(rand, 16, 30));
     return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
       ${styleTag}
       <rect width="1080" height="1080" fill="${dark}"/>
-      <rect x="20" y="20" width="1040" height="1040" fill="none" stroke="${gold}" stroke-width="1" stroke-opacity="0.7"/>
+      <rect x="${inset}" y="${inset}" width="${1080 - inset * 2}" height="${1080 - inset * 2}" fill="none" stroke="${gold}" stroke-width="1" stroke-opacity="0.7"/>
       ${logoTag}
-      ${svgText({ text: headline, x, y: 420, size: 70, lineHeight: 84, weight: 700, fill: light, anchor, maxLines: 3, limit: 22 })}
-      ${svgText({ text: body, x, y: 680, size: 34, lineHeight: 50, weight: 400, fill: light, anchor, maxLines: 3, limit: 38 })}
-      <text x="540" y="1000" fill="${gold}" font-size="20" font-weight="600" text-anchor="middle">${escapeXml(bidiSafe(footer || category || ""))}</text>
-      ${footerBlock({ x, arabic, foreground: light, pageNumber, page, category: "" })}
+      ${svgText({ text: headline, x, y: 420, size: 70, lineHeight: 84, weight: 700, fill: textOnDark, anchor, maxLines: 3, limit: 22 })}
+      ${svgText({ text: body, x, y: 680, size: 34, lineHeight: 50, weight: 400, fill: textOnDark, anchor, maxLines: 3, limit: 38 })}
+      <text x="540" y="1000" fill="${gold}" font-size="20" font-weight="600" text-anchor="middle">${escapeXml(preparedFooterCat)}</text>
+      ${footerBlock({ x, arabic, foreground: textOnDark, pageNumber, page, category: "" })}
     </svg>`;
   }
 
   // H — Layered typography (default and fallback)
-  const footerCategory = category || footer || "فكرة أساسية";
+  const textOnLight = onColor(light);
+  const ghostSize = Math.round(jitter(rand, 150, 190));
+  const labelColor = contrastRatio(light, green) >= 3 ? green : textOnLight;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
     ${styleTag}
     <rect width="1080" height="1080" fill="${light}"/>
     ${logoTag}
-    <text x="990" y="205" fill="${green}" font-size="24" font-weight="600" text-anchor="end" direction="auto">${escapeXml(bidiSafe(footerCategory))}</text>
-    ${svgText({ text: headline, x: 990, y: 300, size: 70, lineHeight: 81, weight: 800, fill: dark, anchor: "end", maxLines: 3, limit: 22 })}
-    <line x1="90" y1="675" x2="990" y2="675" stroke="${dark}" stroke-opacity="0.20"/>
-    ${svgText({ text: body, x: 990, y: 750, size: 34, lineHeight: 51, weight: 400, fill: dark, anchor: "end", maxLines: 2, limit: 34 })}
-    <text x="990" y="920" fill="${dark}" fill-opacity="0.06" font-size="170" font-weight="800" text-anchor="end" direction="auto">${escapeXml(ghostWord)}</text>
-    <line x1="90" y1="972" x2="990" y2="972" stroke="${dark}" stroke-opacity="0.30"/>
-    <text x="90" y="1022" fill="${dark}" font-size="22" font-weight="600" text-anchor="start" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
-    <text x="990" y="1022" fill="${dark}" font-size="22" font-weight="600" text-anchor="end" direction="auto">${escapeXml(bidiSafe(footerCategory))}</text>
+    <text x="990" y="205" fill="${labelColor}" font-size="24" font-weight="600" text-anchor="end" direction="auto">${escapeXml(preparedFooterCat)}</text>
+    ${svgText({ text: headline, x: 990, y: 300, size: 70, lineHeight: 81, weight: 800, fill: textOnLight, anchor: "end", maxLines: 3, limit: 22 })}
+    <line x1="90" y1="675" x2="990" y2="675" stroke="${textOnLight}" stroke-opacity="0.20"/>
+    ${svgText({ text: body, x: 990, y: 750, size: 34, lineHeight: 51, weight: 400, fill: textOnLight, anchor: "end", maxLines: 2, limit: 34 })}
+    <text x="990" y="920" fill="${textOnLight}" fill-opacity="0.06" font-size="${ghostSize}" font-weight="800" text-anchor="end" direction="auto">${escapeXml(ghostWord)}</text>
+    <line x1="90" y1="972" x2="990" y2="972" stroke="${textOnLight}" stroke-opacity="0.30"/>
+    <text x="90" y="1022" fill="${textOnLight}" font-size="22" font-weight="600" text-anchor="start" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
+    <text x="990" y="1022" fill="${textOnLight}" font-size="22" font-weight="600" text-anchor="end" direction="auto">${escapeXml(preparedFooterCat)}</text>
   </svg>`;
 }
 
