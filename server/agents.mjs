@@ -1,852 +1,265 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  ArrowLeft, ArrowRight, ArrowsClockwise, Brain, Check, Copy, DownloadSimple, Globe, ImageSquare,
-  MagicWand, MagnifyingGlass, Palette, PencilSimple, ShieldCheck, Sparkle, UploadSimple, WarningCircle
-} from "@phosphor-icons/react";
-import { GOOGLE_FONTS, googleFontCssUrl } from "../shared/google-fonts.mjs";
+import { GOOGLE_FONTS, GOOGLE_FONT_FAMILIES } from "../shared/google-fonts.mjs";
 
-const initialRuns = { analyst: "idle", writer: "idle", designer: "idle" };
-const defaultBrand = "";
-const embeddedFontCache = new Map();
-const MOTIF_LABELS = {
-  A: "الكلمة الجريئة", B: "الشبكة السويسرية", C: "الدفء الإنساني", D: "الفخامة الداكنة",
-  E: "القسمة القطرية", F: "الرقم الكبير", G: "الإطار الداخلي", H: "الطبقات الكتابية"
-};
-const ALL_MOTIFS = ["A", "B", "C", "D", "E", "F", "G", "H"];
-const MOTIF_OPTIONS = {
-  hook: ["A", "H"], explanatory: ["B", "H"], quote: ["C", "G"], conclusion: ["D", "G"],
-  comparison: ["E", "D"], numbered: ["F", "B"], statement: ["G", "A"], standard: ["H", "B"]
-};
-const CATEGORY_BY_TYPE = { hook: "فكرة أساسية", explanatory: "شرح الفكرة", quote: "صوت إنساني", conclusion: "الخلاصة", comparison: "مقارنة", numbered: "خطوات عملية", statement: "رسالة أساسية", standard: "فكرة أساسية" };
+const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models?limit=100";
+let fontCatalogCache = null;
+let anthropicModelCache = null;
 
-function words(value = "") { return String(value).trim().split(/\s+/).filter(Boolean); }
-function limitWords(value = "", max = 25) { const list = words(value); return list.length > max ? `${list.slice(0, max).join(" ")}…` : list.join(" "); }
-function inferSlideType(slide, index, total) {
-  if (slide?.slideType) return slide.slideType;
-  if (index === 0) return "hook";
-  if (index === total - 1) return "conclusion";
-  const text = `${slide?.headline || ""} ${slide?.body || ""}`;
-  if (/\b\d+\b|خطوات|نصائح|أسباب|steps|tips/i.test(text)) return "numbered";
-  if (/مقارنة|مقابل|قبل|بعد|versus|\bvs\b/i.test(text)) return "comparison";
-  if (/قال|رأي|اقتباس|quote|said/i.test(text)) return "quote";
-  return index % 2 ? "explanatory" : "standard";
+const schemas = {
+  brand_profile: {
+    type: "object",
+    additionalProperties: false,
+    required: ["companyName", "summary", "services", "audiences", "markets", "differentiators", "voice", "contentPillars", "verifiedFacts", "unknowns", "confidence"],
+    properties: {
+      companyName: { type: "string" },
+      summary: { type: "string" },
+      services: { type: "array", items: { type: "string" } },
+      audiences: { type: "array", items: { type: "string" } },
+      markets: { type: "array", items: { type: "string" } },
+      differentiators: { type: "array", items: { type: "string" } },
+      voice: { type: "object", additionalProperties: false, required: ["language", "dialect", "traits", "do", "avoid"], properties: {
+        language: { type: "string" }, dialect: { type: "string" }, traits: { type: "array", items: { type: "string" } }, do: { type: "array", items: { type: "string" } }, avoid: { type: "array", items: { type: "string" } }
+      } },
+      contentPillars: { type: "array", items: { type: "string" } },
+      verifiedFacts: { type: "array", items: { type: "string" } },
+      unknowns: { type: "array", items: { type: "string" } },
+      confidence: { type: "number", minimum: 0, maximum: 100 }
+    }
+  },
+  linkedin_content: (format) => ({
+    type: "object",
+    additionalProperties: false,
+    required: ["angle", "alternativeAngles", "hook", "post", "cta", "hashtags", "recommendedFormat", "designCopy", "carouselSlides", "factsUsed"],
+    properties: {
+      angle: { type: "string" },
+      alternativeAngles: { type: "array", minItems: 2, maxItems: 2, items: { type: "string" } },
+      hook: { type: "string" }, post: { type: "string" }, cta: { type: "string" },
+      hashtags: { type: "array", items: { type: "string" } },
+      recommendedFormat: { type: "string", enum: ["single_image", "carousel", "text_only"] },
+      designCopy: { type: "object", additionalProperties: false, required: ["headline", "body", "category", "slideType"], properties: {
+        headline: { type: "string" }, body: { type: "string" }, category: { type: "string" },
+        slideType: { type: "string", enum: ["hook", "explanatory", "quote", "conclusion", "comparison", "numbered", "statement", "standard"] }
+      } },
+      carouselSlides: {
+        type: "array",
+        minItems: format === "carousel" ? 4 : 0,
+        maxItems: format === "carousel" ? 7 : 0,
+        items: { type: "object", additionalProperties: false, required: ["headline", "body", "category", "slideType"], properties: {
+          headline: { type: "string" }, body: { type: "string" }, category: { type: "string" },
+          slideType: { type: "string", enum: ["hook", "explanatory", "quote", "conclusion", "comparison", "numbered", "statement", "standard"] }
+        } }
+      },
+      factsUsed: { type: "array", items: { type: "string" } }
+    }
+  }),
+  design_spec: {
+    type: "object",
+    additionalProperties: false,
+    required: ["format", "concept", "layout", "headline", "body", "footer", "palette", "typography", "imageDirection", "slides"],
+    properties: {
+      format: { type: "string", enum: ["single_image", "carousel"] }, concept: { type: "string" },
+      layout: { type: "string", enum: ["split", "editorial", "minimal"] },
+      headline: { type: "string" }, body: { type: "string" }, footer: { type: "string" },
+      palette: { type: "array", minItems: 3, maxItems: 5, items: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" } },
+      typography: { type: "object", additionalProperties: false, required: ["fontFamily", "titleWeight", "bodyWeight", "rationale"], properties: {
+        fontFamily: { type: "string", enum: GOOGLE_FONT_FAMILIES },
+        titleWeight: { type: "integer", enum: [400, 700] },
+        bodyWeight: { type: "integer", enum: [400, 700] },
+        rationale: { type: "string" }
+      } },
+      imageDirection: { type: "string" },
+      slides: { type: "array", items: { type: "object", additionalProperties: false, required: ["headline", "body", "footer", "visualDirection"], properties: { headline: { type: "string" }, body: { type: "string" }, footer: { type: "string" }, visualDirection: { type: "string" } } } }
+    }
+  }
+};
+
+function json(res, status, body) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(body));
 }
-function assignMotifs(pages) {
-  let previous = "";
-  return pages.map((page, index) => {
-    const options = MOTIF_OPTIONS[page.slideType] || MOTIF_OPTIONS.standard;
-    const motif = options.find((item) => item !== previous) || options[0];
-    previous = motif;
-    return { ...page, motif, pageNumber: String(index + 1).padStart(2, "0") };
+
+function normalizeFontCatalog(items = []) {
+  return items.map((font) => ({
+    family: font.family,
+    scripts: font.subsets || font.scripts || [],
+    variants: font.variants || [],
+    category: font.category || ""
+  })).filter((font) => font.family).sort((a, b) => a.family.localeCompare(b.family));
+}
+
+async function fetchFontCatalog(apiKey) {
+  if (fontCatalogCache) return fontCatalogCache;
+  try {
+    const url = apiKey
+      ? `https://www.googleapis.com/webfonts/v1/webfonts?sort=alpha&key=${encodeURIComponent(apiKey)}`
+      : "https://fonts.google.com/metadata/fonts";
+    const response = await fetch(url, { headers: { "User-Agent": "ThreeContentStudio/1.0" } });
+    if (!response.ok) throw new Error(`Google Fonts returned ${response.status}`);
+    const raw = await response.text();
+    const payload = JSON.parse(raw.replace(/^\)\]\}'\s*/, ""));
+    const items = payload.items || payload.familyMetadataList || [];
+    const fonts = normalizeFontCatalog(items);
+    if (!fonts.length) throw new Error("Empty Google Fonts catalog");
+    fontCatalogCache = { fonts, source: apiKey ? "google_developer_api" : "google_metadata" };
+  } catch {
+    fontCatalogCache = { fonts: GOOGLE_FONTS, source: "curated_fallback" };
+  }
+  return fontCatalogCache;
+}
+
+function designSchemaFor(fontFamilies) {
+  const schema = JSON.parse(JSON.stringify(schemas.design_spec));
+  schema.properties.typography.properties.fontFamily.enum = fontFamilies;
+  return schema;
+}
+
+async function readJson(req) {
+  let raw = "";
+  for await (const chunk of req) {
+    raw += chunk;
+    if (raw.length > 1_000_000) throw new Error("Request too large");
+  }
+  return raw ? JSON.parse(raw) : {};
+}
+
+function safeUrl(input) {
+  const url = new URL(input);
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error("Only HTTP(S) URLs are supported");
+  const host = url.hostname.toLowerCase();
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".local") || /^10\.|^192\.168\.|^172\.(1[6-9]|2\d|3[01])\./.test(host)) throw new Error("Private network URLs are not supported");
+  return url;
+}
+
+function cleanText(html) {
+  return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<noscript[\s\S]*?<\/noscript>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim().slice(0, 32_000);
+}
+
+function discoverVisuals(html, baseUrl) {
+  const colors = [...html.matchAll(/#[0-9a-fA-F]{6}\b/g)].map((m) => m[0].toUpperCase());
+  const counts = new Map(); colors.forEach((color) => counts.set(color, (counts.get(color) || 0) + 1));
+  const palette = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([color]) => color).filter((color) => !["#FFFFFF", "#000000"].includes(color)).slice(0, 5);
+  const logoMatch = html.match(/<img[^>]+(?:src|data-src)=["']([^"']+)["'][^>]*(?:logo|brand)|<img[^>]+(?:logo|brand)[^>]+(?:src|data-src)=["']([^"']+)["']/i);
+  let logoUrl = "";
+  try { if (logoMatch) logoUrl = new URL(logoMatch[1] || logoMatch[2], baseUrl).href; } catch { /* ignore invalid asset */ }
+  const theme = html.match(/<meta[^>]+name=["']theme-color["'][^>]+content=["'](#[0-9a-fA-F]{6})["']/i)?.[1];
+  return { palette: theme ? [theme.toUpperCase(), ...palette.filter((c) => c !== theme.toUpperCase())].slice(0, 5) : palette, logoUrl };
+}
+
+async function fetchWebsite(input) {
+  const url = safeUrl(input);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(url, { signal: controller.signal, redirect: "follow", headers: { "User-Agent": "BrandContentAnalyst/1.0" } });
+    if (!response.ok) throw new Error(`Website returned ${response.status}`);
+    const html = (await response.text()).slice(0, 600_000);
+    return { finalUrl: response.url, text: cleanText(html), visuals: discoverVisuals(html, response.url) };
+  } finally { clearTimeout(timer); }
+}
+
+async function resolveAnthropicModel(apiKey, preferredModel) {
+  if (anthropicModelCache) return anthropicModelCache;
+  const response = await fetch(ANTHROPIC_MODELS_URL, {
+    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
   });
-}
-
-function escapeXml(value = "") {
-  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function bidiSafe(value = "") {
-  const text = String(value);
-  const arabic = /[\u0600-\u06FF]/.test(text);
-  if (!arabic) return text;
-  // Wrap digit runs in RLM (U+200F) so numbers stay anchored in their
-  // correct reading position inside right-to-left sentences instead of
-  // being pushed to the visual end of the line by the browser's bidi algorithm.
-  return text.replace(/([0-9]+)/g, "\u200F$1\u200F");
-}
-
-function normalizePunctuation(value = "") {
-  let text = String(value);
-  const arabic = /[\u0600-\u06FF]/.test(text);
-  // never a space before a punctuation mark — that's what makes commas/periods
-  // wrap onto their own line and look illogical
-  text = text.replace(/\s+([,،.!؟?;؛:])/g, "$1");
-  // collapse doubled punctuation from generation slip-ups
-  text = text.replace(/([،,])\1+/g, "$1").replace(/\.{2,}(?!\.\.\.)/g, ".");
-  if (arabic) {
-    // Arabic sentences use Arabic-shaped punctuation, not the Western glyphs
-    text = text.replace(/,/g, "،").replace(/\?/g, "؟").replace(/;/g, "؛");
-  }
-  // exactly one space after a punctuation mark when more text follows
-  text = text.replace(/([،,.!؟?;؛:])(?=\S)/g, "$1 ");
-  return text.trim();
-}
-
-function prepareText(value = "") {
-  return bidiSafe(normalizePunctuation(value));
-}
-
-function hexToRgb(hex) {
-  const clean = String(hex).replace("#", "").trim();
-  const full = clean.length === 3 ? clean.split("").map((ch) => ch + ch).join("") : clean.padEnd(6, "0").slice(0, 6);
-  const num = parseInt(full, 16) || 0;
-  return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
-}
-
-function relativeLuminance(hex) {
-  const { r, g, b } = hexToRgb(hex);
-  const lin = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-}
-
-function contrastRatio(hexA, hexB) {
-  const La = relativeLuminance(hexA), Lb = relativeLuminance(hexB);
-  const [light, darkL] = La > Lb ? [La, Lb] : [Lb, La];
-  return (light + 0.05) / (darkL + 0.05);
-}
-
-// Picks the best-contrast color for text/lines against a given background,
-// preferring on-brand palette colors and only falling back to plain
-// white/black when nothing in the palette reads clearly enough (WCAG AA ~4.5).
-function bestOn(bgHex, candidates) {
-  const pool = candidates.filter((c) => c && c.toLowerCase() !== String(bgHex).toLowerCase());
-  let best = pool[0] || "#FFFFFF", bestRatio = -1;
-  for (const c of pool) {
-    const ratio = contrastRatio(bgHex, c);
-    if (ratio > bestRatio) { bestRatio = ratio; best = c; }
-  }
-  if (bestRatio < 4.5) {
-    const white = "#FFFFFF", black = "#111111";
-    best = contrastRatio(bgHex, white) >= contrastRatio(bgHex, black) ? white : black;
-  }
-  return best;
-}
-
-// Deterministic per-post seed so the "same" motif renders as a genuinely
-// different execution for every client and every post, instead of a fixed
-// pixel-identical template.
-function seedFromString(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i += 1) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return h >>> 0;
-}
-function seededRandom(seed) {
-  let s = seed % 2147483647;
-  if (s <= 0) s += 2147483646;
-  return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
-}
-function jitter(rand, min, max) { return min + rand() * (max - min); }
-
-function wrapText(value = "", limit = 24) {
-  const words = String(value).trim().split(/\s+/).filter(Boolean);
-  const lines = [];
-  let current = "";
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (next.length > limit && current) { lines.push(current); current = word; }
-    else current = next;
-  }
-  if (current) lines.push(current);
-  return lines;
-}
-
-function svgText({ text, x, y, size, lineHeight, weight, fill, anchor, maxLines, limit }) {
-  return wrapText(normalizePunctuation(text), limit).slice(0, maxLines).map((line, index) =>
-    `<text x="${x}" y="${y + index * lineHeight}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}" direction="auto">${escapeXml(bidiSafe(line))}</text>`
-  ).join("");
-}
-
-async function imageDataUrl(src) {
-  if (!src || src.startsWith("data:")) return src || "";
-  try {
-    const response = await fetch(src);
-    const blob = await response.blob();
-    return await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.readAsDataURL(blob); });
-  } catch { return ""; }
-}
-
-async function blobDataUrl(blob) {
-  return await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.readAsDataURL(blob); });
-}
-
-async function embedGoogleFontCss(family, text) {
-  const key = `${family}::${text}`;
-  if (embeddedFontCache.has(key)) return embeddedFontCache.get(key);
-  const cssParts = [];
-  for (const weight of [400, 500, 700]) {
-    try {
-      const response = await fetch(googleFontCssUrl(family, { weight, text }));
-      if (response.ok) cssParts.push(await response.text());
-    } catch { /* unsupported weights are skipped */ }
-  }
-  if (!cssParts.length) throw new Error(`تعذّر تحميل خط ${family} من Google Fonts`);
-  let css = cssParts.join("\n");
-  const urls = [...new Set([...css.matchAll(/url\((https:[^)]+)\)/g)].map((match) => match[1].replace(/["']/g, "")))];
-  for (const url of urls) {
-    const response = await fetch(url);
-    if (!response.ok) continue;
-    const dataUrl = await blobDataUrl(await response.blob());
-    css = css.split(url).join(dataUrl);
-  }
-  embeddedFontCache.set(key, css);
-  return css;
-}
-
-function downloadBlob(contents, filename, type = "image/svg+xml") {
-  const href = URL.createObjectURL(new Blob([contents], { type }));
-  const link = document.createElement("a");
-  link.href = href; link.download = filename; link.click();
-  setTimeout(() => URL.revokeObjectURL(href), 1000);
-}
-
-async function makeDesignPngBlob({ headline, body, footer, palette, font, logo, page = 1 }) {
-  if (document.fonts?.load) {
-    await Promise.all([document.fonts.load(`700 84px "${font}"`), document.fonts.load(`400 38px "${font}"`)]);
-  }
-  const canvas = document.createElement("canvas");
-  canvas.width = 1080; canvas.height = 1080;
-  const ctx = canvas.getContext("2d");
-  const background = palette[(page - 1) % palette.length] || "#0E3A31";
-  const accent = palette[1] || "#D7C196";
-  const foreground = page % palette.length === 0 ? (palette[0] || "#0E3A31") : "#FFFFFF";
-  const arabic = /[\u0600-\u06FF]/.test(`${headline} ${body} ${footer}`);
-  const x = arabic ? 990 : 90;
-  ctx.fillStyle = background; ctx.fillRect(0, 0, 1080, 1080);
-  ctx.fillStyle = accent; ctx.fillRect(arabic ? 930 : 90, 210, 60, 10);
-  if (logo) {
-    try {
-      const image = await new Promise((resolve, reject) => { const element = new Image(); element.onload = () => resolve(element); element.onerror = reject; element.src = logo; });
-      const ratio = Math.min(160 / image.width, 90 / image.height);
-      ctx.drawImage(image, arabic ? 990 - image.width * ratio : 90, 70, image.width * ratio, image.height * ratio);
-    } catch { /* export continues without an inaccessible logo */ }
-  }
-  ctx.direction = arabic ? "rtl" : "ltr"; ctx.textAlign = arabic ? "right" : "left"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = foreground;
-  ctx.font = `700 84px "${font}", Arial, sans-serif`;
-  wrapText(headline, 22).slice(0, 3).forEach((line, index) => ctx.fillText(line, x, 360 + index * 100));
-  ctx.font = `400 38px "${font}", Arial, sans-serif`;
-  wrapText(body, 42).slice(0, 4).forEach((line, index) => ctx.fillText(line, x, 700 + index * 56));
-  ctx.globalAlpha = .25; ctx.fillRect(90, 940, 900, 1); ctx.globalAlpha = 1;
-  ctx.font = `500 26px "${font}", Arial, sans-serif`; ctx.fillText(footer, x, 1000);
-  ctx.direction = "ltr"; ctx.textAlign = arabic ? "left" : "right"; ctx.globalAlpha = .7; ctx.font = `400 22px "${font}", Arial, sans-serif`; ctx.fillText(String(page).padStart(2, "0"), arabic ? 90 : 990, 1000); ctx.globalAlpha = 1;
-  return await new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("PNG export failed")), "image/png", 1));
-}
-
-function footerBlock({ x, arabic, foreground, pageNumber, page, category }) {
-  return `<line x1="90" y1="972" x2="990" y2="972" stroke="${foreground}" stroke-opacity="0.25"/>
-    <text x="${arabic ? 90 : 990}" y="1022" fill="${foreground}" font-size="22" font-weight="600" text-anchor="${arabic ? "start" : "end"}" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
-    <text x="${arabic ? 990 : 90}" y="1022" fill="${foreground}" font-size="22" font-weight="600" text-anchor="${arabic ? "end" : "start"}" direction="auto">${escapeXml(prepareText(category || ""))}</text>`;
-}
-
-function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, palette, font, fontCss = "", logo, page = 1 }) {
-  const dark = palette[0] || "#0E3A31";
-  const green = palette[1] || "#168164";
-  const gold = palette[2] || "#D7C196";
-  const light = palette[3] || "#F5F1E8";
-  const onColor = (bgHex) => bestOn(bgHex, palette);
-  const rand = seededRandom(seedFromString(`${headline}|${category}|${motif}|${page}`));
-  const variant = Math.floor(rand() * 2);
-  const arabic = /[\u0600-\u06FF]/.test(`${headline} ${body} ${footer}`);
-  const x = arabic ? 990 : 90;
-  const anchor = arabic ? "end" : "start";
-  const fontStyles = fontCss ? fontCss.replace(/<\/style/gi, "") : `@import url("${escapeXml(googleFontCssUrl(font))}");`;
-  const styleTag = `<style>${fontStyles} text{font-family:'${escapeXml(font)}',Arial,sans-serif}</style>`;
-  const logoTag = logo ? `<image href="${escapeXml(logo)}" x="${arabic ? 830 : 90}" y="60" width="190" height="40" preserveAspectRatio="${arabic ? "xMaxYMid" : "xMinYMid"} meet"/>` : "";
-  const ghostWord = words(headline).slice(0, 1).join("") || "PWP";
-  const preparedCategory = prepareText(category || "");
-  const preparedFooterCat = prepareText(footer || category || "");
-
-  if (motif === "A") {
-    const textOnDark = onColor(dark);
-    const rulePct = jitter(rand, 0.22, 0.32);
-    const tagY = variant === 0 ? 150 : 896;
-    const tagLabelY = variant === 0 ? 173 : 919;
-    const headlineY = variant === 0 ? 340 : 760;
-    const ruleY = variant === 0 ? Math.round(1080 * rulePct) : 700;
-    const ghostY = variant === 0 ? 640 : 420;
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-      ${styleTag}
-      <rect width="1080" height="1080" fill="${dark}"/>
-      <text x="${x}" y="${ghostY}" fill="${textOnDark}" fill-opacity="0.08" font-size="${Math.round(jitter(rand, 560, 660))}" font-weight="800" text-anchor="${anchor}" direction="auto">${escapeXml(ghostWord)}</text>
-      ${logoTag}
-      <rect x="${arabic ? 900 : 90}" y="${tagY}" width="90" height="34" rx="17" fill="${gold}"/>
-      <text x="${arabic ? 945 : 135}" y="${tagLabelY}" fill="${onColor(gold)}" font-size="16" font-weight="700" text-anchor="middle">${escapeXml(preparedCategory)}</text>
-      ${svgText({ text: headline, x, y: headlineY, size: 78, lineHeight: 92, weight: 800, fill: textOnDark, anchor, maxLines: 3, limit: 20 })}
-      <line x1="90" y1="${ruleY}" x2="${arabic ? 300 : 990}" y2="${ruleY}" stroke="${gold}" stroke-width="4"/>
-      ${footerBlock({ x, arabic, foreground: textOnDark, pageNumber, page, category })}
-    </svg>`;
-  }
-
-  if (motif === "B") {
-    const textOnLight = onColor(light);
-    if (variant === 0) {
-      const line1 = Math.round(jitter(rand, 320, 400));
-      const line2 = Math.round(jitter(rand, 680, 760));
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-        ${styleTag}
-        <rect width="1080" height="1080" fill="${light}"/>
-        <line x1="0" y1="${line1}" x2="1080" y2="${line1}" stroke="${textOnLight}" stroke-opacity="0.08"/>
-        <line x1="0" y1="${line2}" x2="1080" y2="${line2}" stroke="${textOnLight}" stroke-opacity="0.08"/>
-        ${logoTag}
-        <text x="${arabic ? 90 : 990}" y="130" fill="${textOnLight}" fill-opacity="0.18" font-size="90" font-weight="800" text-anchor="${arabic ? "start" : "end"}" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
-        ${svgText({ text: headline, x, y: 420, size: 68, lineHeight: 82, weight: 700, fill: textOnLight, anchor, maxLines: 3, limit: 22 })}
-        <rect x="${arabic ? 984 : 90}" y="560" width="6" height="220" fill="${green}"/>
-        ${svgText({ text: body, x: arabic ? 964 : 110, y: 600, size: 34, lineHeight: 50, weight: 400, fill: textOnLight, anchor, maxLines: 4, limit: 38 })}
-        ${footerBlock({ x, arabic, foreground: textOnLight, pageNumber, page, category })}
-      </svg>`;
-    }
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-      ${styleTag}
-      <rect width="1080" height="1080" fill="${light}"/>
-      <line x1="360" y1="0" x2="360" y2="1080" stroke="${textOnLight}" stroke-opacity="0.07"/>
-      <line x1="720" y1="0" x2="720" y2="1080" stroke="${textOnLight}" stroke-opacity="0.07"/>
-      ${logoTag}
-      <text x="${arabic ? 90 : 990}" y="${arabic ? 1000 : 130}" fill="${textOnLight}" fill-opacity="0.18" font-size="90" font-weight="800" text-anchor="${arabic ? "start" : "end"}" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
-      ${svgText({ text: headline, x, y: 500, size: 68, lineHeight: 82, weight: 700, fill: textOnLight, anchor, maxLines: 3, limit: 22 })}
-      <rect x="${arabic ? 984 : 90}" y="620" width="6" height="140" fill="${green}"/>
-      ${svgText({ text: body, x: arabic ? 964 : 110, y: 660, size: 34, lineHeight: 50, weight: 400, fill: textOnLight, anchor, maxLines: 4, limit: 38 })}
-      ${footerBlock({ x, arabic, foreground: textOnLight, pageNumber, page, category })}
-    </svg>`;
-  }
-
-  if (motif === "C") {
-    const textOnGold = onColor(gold);
-    const cx1 = arabic ? Math.round(jitter(rand, 860, 940)) : Math.round(jitter(rand, 140, 220));
-    const r1 = Math.round(jitter(rand, 130, 165));
-    const circlesY = variant === 0 ? 230 : 850;
-    const circlesY2 = variant === 0 ? 330 : 750;
-    const circlesY3 = variant === 0 ? 280 : 800;
-    const quoteY = variant === 0 ? 430 : 900;
-    const headlineY = variant === 0 ? 560 : 320;
-    const bodyY = variant === 0 ? 780 : 560;
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-      ${styleTag}
-      <rect width="1080" height="1080" fill="${gold}"/>
-      <circle cx="${cx1}" cy="${circlesY}" r="${r1}" fill="${green}" fill-opacity="0.35"/>
-      <circle cx="${arabic ? 820 : 260}" cy="${circlesY2}" r="100" fill="${dark}" fill-opacity="0.25"/>
-      <circle cx="${arabic ? 860 : 220}" cy="${circlesY3}" r="46" fill="${light}"/>
-      ${logoTag}
-      <text x="${x}" y="${quoteY}" fill="${textOnGold}" fill-opacity="0.18" font-size="150" font-weight="800" text-anchor="${anchor}" direction="ltr">”</text>
-      ${svgText({ text: headline, x, y: headlineY, size: 62, lineHeight: 78, weight: 700, fill: textOnGold, anchor, maxLines: 3, limit: 22 })}
-      ${svgText({ text: body, x, y: bodyY, size: 34, lineHeight: 50, weight: 400, fill: textOnGold, anchor, maxLines: 3, limit: 38 })}
-      ${footerBlock({ x, arabic, foreground: textOnGold, pageNumber, page, category })}
-    </svg>`;
-  }
-
-  if (motif === "D") {
-    const textOnDark = onColor(dark);
-    const rot1 = Math.round(jitter(rand, 12, 24));
-    const rot2 = -Math.round(jitter(rand, 8, 18));
-    const layersY = variant === 0 ? -80 : 440;
-    const layersY2 = variant === 0 ? 40 : 560;
-    const headlineY = variant === 0 ? 480 : 760;
-    const ruleY = variant === 0 ? 620 : 640;
-    const bodyY = variant === 0 ? 690 : 480;
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-      ${styleTag}
-      <rect width="1080" height="1080" fill="${dark}"/>
-      <rect x="${arabic ? 560 : -120}" y="${layersY}" width="640" height="640" fill="${green}" fill-opacity="0.55" transform="rotate(${rot1} ${arabic ? 880 : 200} 240)"/>
-      <rect x="${arabic ? 460 : -60}" y="${layersY2}" width="500" height="500" fill="${green}" fill-opacity="0.35" transform="rotate(${rot2} ${arabic ? 780 : 260} 300)"/>
-      ${logoTag}
-      ${variant === 0 ? "" : svgText({ text: body, x, y: bodyY, size: 34, lineHeight: 50, weight: 400, fill: textOnDark, anchor, maxLines: 3, limit: 38 })}
-      ${svgText({ text: headline, x, y: headlineY, size: 72, lineHeight: 86, weight: 700, fill: textOnDark, anchor, maxLines: 3, limit: 20 })}
-      <line x1="90" y1="${ruleY}" x2="990" y2="${ruleY}" stroke="${gold}" stroke-width="2"/>
-      ${variant === 0 ? svgText({ text: body, x, y: bodyY, size: 34, lineHeight: 50, weight: 400, fill: textOnDark, anchor, maxLines: 3, limit: 38 }) : ""}
-      ${footerBlock({ x, arabic, foreground: textOnDark, pageNumber, page, category })}
-    </svg>`;
-  }
-
-  if (motif === "E") {
-    const textOnLight = onColor(light);
-    const textOnGreen = onColor(green);
-    const splitShift = Math.round(jitter(rand, -120, 120));
-    if (variant === 0) {
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-        ${styleTag}
-        <rect width="1080" height="1080" fill="${light}"/>
-        <polygon points="${arabic ? `1080,0 1080,1080 ${300 + splitShift},1080` : `0,0 0,1080 ${780 + splitShift},1080`}" fill="${green}"/>
-        ${logoTag}
-        ${svgText({ text: headline, x: arabic ? 990 : 90, y: 300, size: 66, lineHeight: 80, weight: 700, fill: textOnLight, anchor, maxLines: 3, limit: 20 })}
-        ${svgText({ text: body, x: arabic ? 940 : 140, y: 780, size: 34, lineHeight: 50, weight: 400, fill: textOnGreen, anchor, maxLines: 3, limit: 34 })}
-        ${footerBlock({ x, arabic, foreground: textOnLight, pageNumber, page, category })}
-      </svg>`;
-    }
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-      ${styleTag}
-      <rect width="1080" height="1080" fill="${light}"/>
-      <polygon points="${arabic ? `0,0 1080,0 ${780 + splitShift},1080 0,1080` : `1080,0 0,0 ${300 + splitShift},1080 1080,1080`}" fill="${green}"/>
-      ${logoTag}
-      ${svgText({ text: headline, x: arabic ? 990 : 90, y: 300, size: 66, lineHeight: 80, weight: 700, fill: textOnGreen, anchor, maxLines: 3, limit: 20 })}
-      ${svgText({ text: body, x: arabic ? 940 : 140, y: 780, size: 34, lineHeight: 50, weight: 400, fill: textOnLight, anchor, maxLines: 3, limit: 34 })}
-      ${footerBlock({ x, arabic, foreground: textOnGreen, pageNumber, page, category })}
-    </svg>`;
-  }
-
-  if (motif === "F") {
-    const textOnGreen = onColor(green);
-    const headlineY = variant === 0 ? 210 : 720;
-    const numberY = variant === 0 ? 680 : 430;
-    const numberSize = variant === 0 ? 300 : 320;
-    const ruleY = variant === 0 ? 770 : 540;
-    const bodyY = variant === 0 ? 830 : 900;
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-      ${styleTag}
-      <rect width="1080" height="1080" fill="${green}"/>
-      ${logoTag}
-      ${svgText({ text: headline, x, y: headlineY, size: 38, lineHeight: 48, weight: 700, fill: textOnGreen, anchor, maxLines: 2, limit: 32 })}
-      <text x="${x}" y="${numberY}" fill="${textOnGreen}" font-size="${numberSize}" font-weight="800" text-anchor="${anchor}" direction="ltr">${escapeXml(String(pageNumber || page))}</text>
-      <line x1="90" y1="${ruleY}" x2="990" y2="${ruleY}" stroke="${textOnGreen}" stroke-opacity="0.3"/>
-      ${svgText({ text: body, x, y: bodyY, size: 30, lineHeight: 44, weight: 400, fill: textOnGreen, anchor, maxLines: 2, limit: 42 })}
-      ${footerBlock({ x, arabic, foreground: textOnGreen, pageNumber, page, category })}
-    </svg>`;
-  }
-
-  if (motif === "G") {
-    const textOnDark = onColor(dark);
-    const inset = Math.round(jitter(rand, 16, 30));
-    const headlineY = variant === 0 ? 420 : 500;
-    const bodyY = variant === 0 ? 680 : 720;
-    const signatureY = variant === 0 ? 1000 : 130;
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-      ${styleTag}
-      <rect width="1080" height="1080" fill="${dark}"/>
-      <rect x="${inset}" y="${inset}" width="${1080 - inset * 2}" height="${1080 - inset * 2}" fill="none" stroke="${gold}" stroke-width="1" stroke-opacity="0.7"/>
-      ${logoTag}
-      ${svgText({ text: headline, x, y: headlineY, size: 70, lineHeight: 84, weight: 700, fill: textOnDark, anchor, maxLines: 3, limit: 22 })}
-      ${svgText({ text: body, x, y: bodyY, size: 34, lineHeight: 50, weight: 400, fill: textOnDark, anchor, maxLines: 3, limit: 38 })}
-      <text x="540" y="${signatureY}" fill="${gold}" font-size="20" font-weight="600" text-anchor="middle">${escapeXml(preparedFooterCat)}</text>
-      ${footerBlock({ x, arabic, foreground: textOnDark, pageNumber, page, category: "" })}
-    </svg>`;
-  }
-
-  // H — Layered typography (default and fallback)
-  const textOnLight = onColor(light);
-  const ghostSize = Math.round(jitter(rand, 150, 190));
-  const labelColor = contrastRatio(light, green) >= 3 ? green : textOnLight;
-  if (variant === 0) {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-      ${styleTag}
-      <rect width="1080" height="1080" fill="${light}"/>
-      ${logoTag}
-      <text x="990" y="205" fill="${labelColor}" font-size="24" font-weight="600" text-anchor="end" direction="auto">${escapeXml(preparedFooterCat)}</text>
-      ${svgText({ text: headline, x: 990, y: 300, size: 70, lineHeight: 81, weight: 800, fill: textOnLight, anchor: "end", maxLines: 3, limit: 22 })}
-      <line x1="90" y1="675" x2="990" y2="675" stroke="${textOnLight}" stroke-opacity="0.20"/>
-      ${svgText({ text: body, x: 990, y: 750, size: 34, lineHeight: 51, weight: 400, fill: textOnLight, anchor: "end", maxLines: 2, limit: 34 })}
-      <text x="990" y="920" fill="${textOnLight}" fill-opacity="0.06" font-size="${ghostSize}" font-weight="800" text-anchor="end" direction="auto">${escapeXml(ghostWord)}</text>
-      <line x1="90" y1="972" x2="990" y2="972" stroke="${textOnLight}" stroke-opacity="0.30"/>
-      <text x="90" y="1022" fill="${textOnLight}" font-size="22" font-weight="600" text-anchor="start" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
-      <text x="990" y="1022" fill="${textOnLight}" font-size="22" font-weight="600" text-anchor="end" direction="auto">${escapeXml(preparedFooterCat)}</text>
-    </svg>`;
-  }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
-    ${styleTag}
-    <rect width="1080" height="1080" fill="${light}"/>
-    ${logoTag}
-    <text x="990" y="205" fill="${labelColor}" font-size="24" font-weight="600" text-anchor="end" direction="auto">${escapeXml(preparedFooterCat)}</text>
-    <text x="990" y="420" fill="${textOnLight}" fill-opacity="0.06" font-size="${ghostSize}" font-weight="800" text-anchor="end" direction="auto">${escapeXml(ghostWord)}</text>
-    ${svgText({ text: body, x: 990, y: 560, size: 34, lineHeight: 51, weight: 400, fill: textOnLight, anchor: "end", maxLines: 2, limit: 34 })}
-    <line x1="90" y1="700" x2="990" y2="700" stroke="${textOnLight}" stroke-opacity="0.20"/>
-    ${svgText({ text: headline, x: 990, y: 800, size: 70, lineHeight: 81, weight: 800, fill: textOnLight, anchor: "end", maxLines: 3, limit: 22 })}
-    <line x1="90" y1="972" x2="990" y2="972" stroke="${textOnLight}" stroke-opacity="0.30"/>
-    <text x="90" y="1022" fill="${textOnLight}" font-size="22" font-weight="600" text-anchor="start" direction="ltr">${escapeXml(pageNumber || String(page).padStart(2, "0"))}</text>
-    <text x="990" y="1022" fill="${textOnLight}" font-size="22" font-weight="600" text-anchor="end" direction="auto">${escapeXml(preparedFooterCat)}</text>
-  </svg>`;
-}
-
-async function rasterizeSvg(svg) {
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
-  try {
-    const image = await new Promise((resolve, reject) => {
-      const element = new Image();
-      element.onload = () => resolve(element); element.onerror = reject; element.src = url;
-    });
-    const canvas = document.createElement("canvas");
-    canvas.width = 1080; canvas.height = 1080;
-    canvas.getContext("2d").drawImage(image, 0, 0, 1080, 1080);
-    return await new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("PNG export failed")), "image/png", 1));
-  } finally { URL.revokeObjectURL(url); }
-}
-
-async function api(path, body) {
-  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || "تعذّر تشغيل الوكيل");
-  return payload;
+  if (!response.ok) throw new Error(payload.error?.message || `Could not list Anthropic models (${response.status})`);
+  const available = (payload.data || []).map((item) => item.id).filter(Boolean);
+  anthropicModelCache = available.includes(preferredModel)
+    ? preferredModel
+    : available.find((id) => /sonnet/i.test(id)) || available[0];
+  if (!anthropicModelCache) throw new Error("No Claude models are available for this Anthropic API key");
+  return anthropicModelCache;
 }
 
-function AgentCard({ number, title, role, icon, status, active }) {
-  const Icon = icon;
-  const statusText = status === "running" ? "يعمل الآن" : status === "done" ? "اكتمل" : status === "error" ? "حدث خطأ" : "بانتظار دوره";
-  return <div className={`agent-card ${active ? "active" : ""} ${status}`}>
-    <div className="agent-icon"><Icon size={21} weight="duotone" /></div>
-    <div><span>AI {number}</span><b>{title}</b><small>{role}</small></div>
-    <em>{status === "done" && <Check weight="bold" size={12} />}{status === "running" && <i />}{statusText}</em>
-  </div>;
+async function runClaude({ apiKey, model, schema, instructions, input, toolName = "submit_structured_output", toolDescription = "Return the final structured result." }) {
+  if (!apiKey) throw Object.assign(new Error("ANTHROPIC_API_KEY is not configured"), { code: "missing_anthropic_api_key" });
+  const availableModel = await resolveAnthropicModel(apiKey, model);
+  const response = await fetch(ANTHROPIC_URL, {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      model: availableModel,
+      max_tokens: 4096,
+      system: instructions,
+      messages: [{ role: "user", content: input }],
+      tools: [{ name: toolName, description: toolDescription, input_schema: schema }],
+      tool_choice: { type: "tool", name: toolName }
+    })
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error?.message || `Anthropic request failed (${response.status})`);
+  const toolUse = payload.content?.find((block) => block.type === "tool_use" && block.name === toolName);
+  if (!toolUse?.input) throw new Error("Claude returned no structured output");
+  return toolUse.input;
 }
 
-function EmptyAgent({ icon: Icon, title, text }) {
-  return <div className="empty-agent"><Icon size={34} weight="duotone" /><b>{title}</b><p>{text}</p></div>;
-}
-
-export function App() {
-  const [apiStatus, setApiStatus] = useState({ loading: true, configured: false, model: "", designerConfigured: false, designerModel: "" });
-  const [stage, setStage] = useState(1);
-  const [runs, setRuns] = useState(initialRuns);
-  const [url, setUrl] = useState("");
-  const [context, setContext] = useState("");
-  const [profile, setProfile] = useState(null);
-  const [source, setSource] = useState(null);
-  const [brief, setBrief] = useState({ language: "Arabic", goal: "بناء الثقة والوعي", dialect: "العربية السعودية", format: "single_image", note: "", styleExamples: "" });
-  const [content, setContent] = useState(null);
-  const [editableContent, setEditableContent] = useState({ hook: "", post: "", cta: "" });
-  const [design, setDesign] = useState(null);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [customLogo, setCustomLogo] = useState("");
-  const [palette, setPalette] = useState(["#0E3A31", "#168164", "#D7C196", "#F5F1E8"]);
-  const [fontPreference, setFontPreference] = useState("auto");
-  const [fontSearch, setFontSearch] = useState("");
-  const [fontCatalog, setFontCatalog] = useState(GOOGLE_FONTS);
-  const [fontCatalogSource, setFontCatalogSource] = useState("loading");
-  const [embeddedLogo, setEmbeddedLogo] = useState("");
-  const [embeddedFontCss, setEmbeddedFontCss] = useState("");
-  const [fontEmbedding, setFontEmbedding] = useState(false);
-  const [previewPngs, setPreviewPngs] = useState([]);
-  const [previewRendering, setPreviewRendering] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/status").then((r) => r.json()).then((data) => setApiStatus({ loading: false, ...data })).catch(() => setApiStatus({ loading: false, configured: false, model: "" }));
-    fetch("/api/fonts").then((r) => r.json()).then((data) => {
-      if (data.fonts?.length) setFontCatalog(data.fonts);
-      setFontCatalogSource(data.source || "curated_fallback");
-    }).catch(() => setFontCatalogSource("curated_fallback"));
-  }, []);
-
-  const logo = customLogo || source?.logoUrl || defaultBrand;
-  const visualPalette = design?.palette?.length >= 3 ? design.palette : palette;
-  const previewFont = fontPreference === "auto" ? (design?.typography?.fontFamily || "Cairo") : fontPreference;
-  const filteredFonts = useMemo(() => fontCatalog.filter((font) => `${font.family} ${font.mood || ""} ${font.category || ""} ${(font.scripts || []).join(" ")}`.toLowerCase().includes(fontSearch.trim().toLowerCase())).slice(0, 120), [fontCatalog, fontSearch]);
-  const hasExactFontMatch = fontCatalog.some((font) => font.family.toLowerCase() === fontSearch.trim().toLowerCase());
-  const captionText = content ? `${editableContent.hook}\n\n${editableContent.post}\n\n${editableContent.cta}` : "";
-  const hashtagText = content?.hashtags?.join(" ") || "";
-
-  useEffect(() => {
-    let active = true;
-    imageDataUrl(logo).then((value) => { if (active) setEmbeddedLogo(value); });
-    return () => { active = false; };
-  }, [logo]);
-
-  useEffect(() => {
-    const id = "active-google-font";
-    let link = document.getElementById(id);
-    if (!link) {
-      link = document.createElement("link");
-      link.id = id;
-      link.rel = "stylesheet";
-      document.head.appendChild(link);
+export function createAgentsMiddleware({ googleFontsApiKey, anthropicApiKey, anthropicModel }) {
+  return async function agentsMiddleware(req, res, next) {
+    if (!req.url?.startsWith("/api/")) return next();
+    if (req.method === "GET" && req.url === "/api/status") return json(res, 200, {
+      configured: Boolean(anthropicApiKey),
+      model: anthropicModel
+    });
+    if (req.method === "GET" && req.url === "/api/fonts") {
+      const catalog = await fetchFontCatalog(googleFontsApiKey);
+      return json(res, 200, catalog);
     }
-    link.href = googleFontCssUrl(previewFont);
-  }, [previewFont]);
-
-  async function analyze() {
-    setError("");
-    if (!url.trim()) return setError("ضع رابط موقع الشركة أولاً.");
-    setRuns((r) => ({ ...r, analyst: "running" }));
+    if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
     try {
-      const data = await api("/api/agents/analyze", { url, context, contentLanguage: brief.language });
-      setProfile(data.result); setSource(data.source);
-      if (data.source.palette?.length >= 2) setPalette([...data.source.palette, "#F5F1E8"].slice(0, 5));
-      setRuns((r) => ({ ...r, analyst: "done" }));
-    } catch (e) { setRuns((r) => ({ ...r, analyst: "error" })); setError(e.message); }
-  }
-
-  async function write(angleOverride) {
-    setError(""); setRuns((r) => ({ ...r, writer: "running" }));
-    try {
-      const effectiveBrief = angleOverride ? { ...brief, note: `اكتب حول هذه الزاوية تحديدًا: ${angleOverride}` } : brief;
-      const data = await api("/api/agents/write", { brandProfile: profile, brief: effectiveBrief });
-      setContent(data.result);
-      setEditableContent({ hook: data.result.hook, post: data.result.post, cta: data.result.cta });
-      setRuns((r) => ({ ...r, writer: "done" }));
-    } catch (e) { setRuns((r) => ({ ...r, writer: "error" })); setError(e.message); }
-  }
-
-  function useAlternativeAngle(angleText) {
-    write(angleText);
-  }
-
-  function designPost() {
-    setError(""); setRuns((r) => ({ ...r, designer: "running" }));
-    const isCarousel = content?.recommendedFormat === "carousel";
-    const chosenFont = fontPreference === "auto" ? "Baloo Bhaijaan 2" : fontPreference;
-    const rawPages = isCarousel ? (content.carouselSlides || []) : [{
-      headline: content?.designCopy?.headline || limitWords(content?.hook || "", 8),
-      body: content?.designCopy?.body || limitWords(content?.post || "", 25),
-      category: content?.designCopy?.category || "فكرة أساسية",
-      slideType: content?.designCopy?.slideType || "standard"
-    }];
-    const normalizedPages = rawPages.map((slide, index) => {
-      const slideType = inferSlideType(slide, index, rawPages.length);
-      return {
-        headline: limitWords(slide.headline, 8), body: limitWords(slide.body, 25),
-        category: limitWords(slide.category || CATEGORY_BY_TYPE[slideType] || "فكرة أساسية", 2), slideType
-      };
-    });
-    const promptPages = assignMotifs(normalizedPages);
-    const localPages = promptPages.map((pageData) => ({ ...pageData, footer: pageData.category }));
-    if (isCarousel) {
-      setDesign({ format: "carousel", concept: "PWP Motif System — A–H", palette, typography: { fontFamily: chosenFont }, slides: localPages });
-    } else {
-      const pageData = localPages[0];
-      setDesign({ format: "single_image", concept: `PWP Motif ${pageData.motif}`, palette, typography: { fontFamily: chosenFont }, slides: [], ...pageData });
-    }
-    setRuns((r) => ({ ...r, designer: "done" }));
-  }
-
-  function updateSlideField(index, field, value) {
-    setDesign((prev) => {
-      if (!prev) return prev;
-      if (prev.format === "carousel") {
-        return { ...prev, slides: prev.slides.map((s, i) => (i === index ? { ...s, [field]: value } : s)) };
+      const body = await readJson(req);
+      if (req.url === "/api/agents/analyze") {
+        const site = await fetchWebsite(body.url);
+        const result = await runClaude({ apiKey: anthropicApiKey, model: anthropicModel, schema: schemas.brand_profile,
+          toolName: "submit_brand_profile", toolDescription: "Return the final verified brand profile.",
+          instructions: "You are Brand Analyst, the first of three agents. Analyze only the supplied website evidence. Extract verified company facts, services, audiences, markets, differentiation, brand voice, and useful LinkedIn content pillars. Never invent numbers, customers, outcomes, or services. Put missing or uncertain information in unknowns. Write the entire structured response in the user's requested content language.",
+          input: `Requested content language: ${body.contentLanguage === "English" ? "English" : "Arabic"}\nSource URL: ${site.finalUrl}\nDetected visual signals: ${JSON.stringify(site.visuals)}\nAdditional client context: ${body.context || "none"}\nWebsite text:\n${site.text}` });
+        return json(res, 200, { result, source: { url: site.finalUrl, ...site.visuals } });
       }
-      return { ...prev, [field]: value };
-    });
-  }
-
-  function cycleMotif(index) {
-    setDesign((prev) => {
-      if (!prev) return prev;
-      const next = (motif) => ALL_MOTIFS[(ALL_MOTIFS.indexOf(motif) + 1) % ALL_MOTIFS.length];
-      if (prev.format === "carousel") {
-        return { ...prev, slides: prev.slides.map((s, i) => (i === index ? { ...s, motif: next(s.motif) } : s)) };
+      if (req.url === "/api/agents/write") {
+        const styleExamples = Array.isArray(body.brief?.styleExamples)
+          ? body.brief.styleExamples.filter(Boolean).slice(0, 3)
+          : String(body.brief?.styleExamples || "").trim() ? [String(body.brief.styleExamples).trim()] : [];
+        const baseInstructions = "You are LinkedIn Content Strategist and carousel editor, the second of three agents. Use only the approved brand profile and user brief. Never add unsupported claims.\n\nBANNED PATTERNS — never use these, in any language: generic openers like 'In today's world', 'في عالم اليوم', 'الحقيقة إن', 'دعني أخبرك'; rhetorical questions as openers ('هل تعلم أن...?', 'Did you know...?'); rocket/fire/sparkle emojis or any emoji used as a bullet marker; three-item listicle structures unless the content is genuinely three real steps; corporate filler words (unlock, leverage, seamless, game-changer, revolutionize, تمكين, نقلة نوعية, ثورة في); a hook that just restates the headline as a question; closing with 'What do you think? Comment below' unless the brief goal is genuinely to spark discussion. If the brand voice 'avoid' list bans something, treat it as equally forbidden.\n\nPUNCTUATION: When writing Arabic, use Arabic-shaped punctuation only — '،' not ',', '؟' not '?', '؛' not ';'. Never put a space before any punctuation mark. Never leave a comma or period stranded at the start of a clause; punctuation always attaches directly to the word before it. Keep numerals as plain digits (e.g. '80', '3') even inside Arabic sentences — do not spell them out and do not add stray spacing around them.\n\nVOICE MATCHING: If styleExamples are supplied, they are real posts the client already likes. Match their sentence rhythm, average sentence length, and level of formality closely — treat them as the ground truth for voice, weighted above the generic brand voice traits. Do not copy their specific claims or sentences, only the writing style.\n\nCreate designCopy with one short visual idea: headline maximum 6-8 words, body maximum 20-25 words, category maximum two words, and an accurate slideType. Never shrink or overload design copy. If recommendedFormat is text_only, still populate designCopy from the post's core idea in case the user changes format later, and return an empty carouselSlides array. For single_image, return an empty carouselSlides array. For carousel, produce EXACTLY 5 slides (never fewer than 4, never more than 7), one idea per slide — this is a hard requirement, not a suggestion. The first slide is slideType hook and the last is conclusion. Use comparison only for a real two-sided contrast, numbered only for an actual sequence of distinct steps or numbered items (not just because a number appears somewhere in the copy), quote for a genuine voice/opinion, statement for a short strong assertion, explanatory for analysis, and standard otherwise. slideType must vary meaningfully across the carousel — do not label most or all of the middle slides with the same slideType; each one should reflect what that specific slide is actually doing (introducing, explaining, contrasting, asserting, concluding), not a single repeated label copied down the list. Do not lose meaning or add claims while splitting.\n\nChoose one sharp, non-generic angle for the main post. Also return alternativeAngles: exactly two other genuinely different one-line angle ideas (different enough that picking one would change the whole post, not just its phrasing) that this brand could also credibly post about right now, so the user can pick a different direction without leaving the app. Return factsUsed so the user can audit the copy.";
+        const input = `Approved brand profile:\n${JSON.stringify(body.brandProfile)}\nContent brief:\n${JSON.stringify(body.brief)}${styleExamples.length ? `\nReal posts to match the voice of (style only, do not reuse claims):\n${styleExamples.map((example, i) => `Example ${i + 1}:\n${example}`).join("\n\n")}` : ""}`;
+        const wantsCarousel = body.brief?.format === "carousel";
+        const callWriter = (instructions) => runClaude({ apiKey: anthropicApiKey, model: anthropicModel, schema: schemas.linkedin_content(body.brief?.format),
+          toolName: "submit_linkedin_content", toolDescription: "Return the final approved LinkedIn content and design copy.",
+          instructions, input });
+        let result = await callWriter(baseInstructions);
+        if (wantsCarousel && (result.carouselSlides?.length || 0) < 4) {
+          // Claude's tool schema is a strong hint, not a hard database-level constraint like OpenAI's
+          // strict JSON mode — retry once with a sharper, more insistent instruction before giving up.
+          result = await callWriter(`${baseInstructions}\n\nCRITICAL: your previous attempt returned only ${result.carouselSlides?.length || 0} carousel slides. This is invalid — carouselSlides MUST contain between 4 and 7 items. Split the idea across more slides if needed. Do not return fewer than 4.`);
+        }
+        if (wantsCarousel && (result.carouselSlides?.length || 0) < 4) {
+          return json(res, 502, { error: "تعذّر توليد كل صفحات الكاروسيل. جرّب تشغّل الكاتب مرة ثانية." });
+        }
+        result.recommendedFormat = wantsCarousel ? "carousel" : body.brief?.format === "text_only" ? "text_only" : "single_image";
+        if (result.recommendedFormat !== "carousel") result.carouselSlides = [];
+        return json(res, 200, { result });
       }
-      return { ...prev, motif: next(prev.motif) };
-    });
-  }
-
-  function uploadLogo(event) {
-    const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => setCustomLogo(reader.result);
-      reader.readAsDataURL(file);
+      if (req.url === "/api/agents/design") {
+        const preferredFont = String(body.brandKit?.preferredFont || "auto").trim();
+        const allowedFonts = preferredFont === "auto" ? GOOGLE_FONT_FAMILIES : [preferredFont];
+        const fontOptions = preferredFont === "auto" ? GOOGLE_FONTS : [{ family: preferredFont, scripts: [], mood: "user selected" }];
+        const result = await runClaude({ apiKey: anthropicApiKey, model: anthropicModel, schema: designSchemaFor(allowedFonts),
+          toolName: "submit_design_spec", toolDescription: "Return the final production-ready LinkedIn design specification.",
+          instructions: "You are Brand Visual Director, the third of three agents. Turn the approved LinkedIn content into a clear production-ready design specification. The approved content format is mandatory: use exactly content.recommendedFormat. Every design must have three explicit content roles: headline is the primary attention message, body is the supporting explanation, and footer is a short CTA, brand signature, or page cue. Apply the same headline/body/footer hierarchy to every carousel slide. Use this fixed 1080×1080 typography system: Headline: 84 px font size / 100 px line height — Bold. Body: 38 px font size / 56 px line height — Regular. Footer: 26 px font size / 36 px line height — Medium. Keep all essential content inside 90 px safe margins on every side. Choose typography only from the supplied Google Fonts catalog, considering language support, brand voice, and legibility. If preferredFont is not 'auto', use that exact font. Respect the supplied logo, palette, and content hierarchy. Keep Arabic text short and legible. Do not alter facts or add marketing claims. For single_image return an empty slides array; for carousel return 4-7 slides. Use only valid hex colors.",
+          input: `Brand profile:\n${JSON.stringify(body.brandProfile)}\nApproved content:\n${JSON.stringify(body.content)}\nBrand kit:\n${JSON.stringify(body.brandKit)}\nAllowed Google Fonts:\n${JSON.stringify(fontOptions)}` });
+        result.format = body.content?.recommendedFormat === "carousel" ? "carousel" : "single_image";
+        if (result.format === "single_image") result.slides = [];
+        return json(res, 200, { result });
+      }
+      return json(res, 404, { error: "Unknown API route" });
+    } catch (error) {
+      const status = ["missing_api_key", "missing_anthropic_api_key"].includes(error.code) ? 503 : 400;
+      return json(res, status, { error: error.message, code: error.code || "agent_error" });
     }
-  }
-
-  function restart() {
-    setStage(1); setRuns(initialRuns); setProfile(null); setContent(null); setDesign(null); setError("");
-    setEditableContent({ hook: "", post: "", cta: "" });
-    setBrief({ language: "Arabic", goal: "بناء الثقة والوعي", dialect: "العربية السعودية", format: "single_image", note: "", styleExamples: "" });
-  }
-
-  async function copyValue(value, message) {
-    if (value) await navigator.clipboard.writeText(value);
-    setNotice(message); setTimeout(() => setNotice(""), 1800);
-  }
-
-  async function downloadDesign() {
-    if (!design) return;
-    previewSvgs.forEach((svg, index) => {
-      downloadBlob(svg, `${profile?.companyName || "linkedin"}-design-${index + 1}.svg`);
-    });
-    setNotice(design.format === "carousel" ? "تم تحميل صفحات الكاروسيل" : "تم تحميل التصميم");
-    setTimeout(() => setNotice(""), 1800);
-  }
-
-  async function downloadDesignPng() {
-    if (!design) return;
-    const pages = design.format === "carousel" ? slides : [{ headline: design.headline, body: design.body, footer: design.footer }];
-    for (let index = 0; index < pages.length; index += 1) {
-      let png;
-      try { png = await rasterizeSvg(previewSvgs[index]); }
-      catch { png = await makeDesignPngBlob({ ...pages[index], palette: visualPalette, font: previewFont, logo: embeddedLogo, page: index + 1 }); }
-      downloadBlob(png, `${profile?.companyName || "linkedin"}-design-${index + 1}.png`, "image/png");
-    }
-    setNotice(design.format === "carousel" ? "تم تحميل صفحات الكاروسيل PNG" : "تم تحميل التصميم PNG");
-    setTimeout(() => setNotice(""), 1800);
-  }
-
-  const agentActive = runs.designer === "running" || stage === 3 ? 3 : runs.writer === "running" || stage === 2 || stage === 4 ? 2 : 1;
-  const slides = useMemo(() => design?.slides?.length ? design.slides : content?.carouselSlides || [], [design, content]);
-  const designPages = useMemo(() => design?.format === "carousel" ? slides : design ? [{ headline: design.headline, body: design.body, footer: design.footer, category: design.category, motif: design.motif, pageNumber: design.pageNumber }] : [], [design, slides]);
-  const designText = useMemo(() => {
-    const contentText = designPages.map((page) => `${page.headline || ""} ${page.body || ""} ${page.footer || ""} ${page.category || ""}`).join(" ").trim();
-    // Always request full digit coverage (and the smart-quote glyph used by one motif) regardless of
-    // what happens to appear in the copy — otherwise whichever slide's own text doesn't contain a
-    // given digit falls back to a different system font just for its page number / big-number motif.
-    return `${contentText} 0123456789 ”`.trim();
-  }, [designPages]);
-
-  useEffect(() => {
-    let active = true;
-    if (!designText) { setEmbeddedFontCss(""); setFontEmbedding(false); return () => { active = false; }; }
-    setEmbeddedFontCss(""); setFontEmbedding(true);
-    embedGoogleFontCss(previewFont, designText).then((css) => { if (active) setEmbeddedFontCss(css); }).catch((fontError) => { if (active) setError(fontError.message); }).finally(() => { if (active) setFontEmbedding(false); });
-    return () => { active = false; };
-  }, [previewFont, designText]);
-
-  const previewSvgs = useMemo(() => designPages.map((page, index) => makeDesignSvg({ ...page, palette: visualPalette, font: previewFont, fontCss: embeddedFontCss, logo: embeddedLogo, page: index + 1 })), [designPages, visualPalette, previewFont, embeddedFontCss, embeddedLogo]);
-
-  useEffect(() => {
-    let active = true;
-    if (!design || !embeddedFontCss || fontEmbedding || !previewSvgs.length) {
-      setPreviewPngs([]); setPreviewRendering(Boolean(design));
-      return () => { active = false; };
-    }
-    setPreviewRendering(true);
-    Promise.all(previewSvgs.map(async (svg) => blobDataUrl(await rasterizeSvg(svg))))
-      .then((images) => { if (active) setPreviewPngs(images); })
-      .catch((previewError) => { if (active) setError(`تعذّر إنشاء المعاينة: ${previewError.message}`); })
-      .finally(() => { if (active) setPreviewRendering(false); });
-    return () => { active = false; };
-  }, [design, embeddedFontCss, fontEmbedding, previewSvgs]);
-
-  return <div className="orchestrator" dir="rtl" data-font-count={fontCatalog.length} data-font-source={fontCatalogSource}>
-    <header className="app-header">
-      <div className="product-mark"><span><Sparkle weight="fill" /></span><div><b>ثلاثة</b><small>استوديو محتوى بالذكاء الاصطناعي</small></div></div>
-      <div className="header-meta"><span className={apiStatus.configured ? "connected" : "offline"}>{apiStatus.configured ? `Claude · ${apiStatus.model}` : "Claude غير متصل"}</span><button onClick={restart}>مشروع جديد</button></div>
-    </header>
-
-    <main>
-      <section className="intro">
-        <div><span>من الشركة إلى منشور جاهز</span><h1>ثلاثة وكلاء. نتيجة واحدة متماسكة.</h1><p>كل وكيل ينجز مهمة واحدة، ويسلّم نتيجة منظّمة للوكيل التالي.</p></div>
-        <div className="privacy"><ShieldCheck size={20} /><span><b>لا ادعاءات مخترعة</b><small>المحتوى يعتمد على معلومات الشركة المعتمدة فقط.</small></span></div>
-      </section>
-
-      {!apiStatus.loading && !apiStatus.configured && <section className="api-warning"><WarningCircle size={22} /><div><b>أضف مفتاح Claude لتشغيل الوكلاء الحقيقيين</b><p>أنشئ ملف <code>.env.local</code> داخل المشروع وأضف <code>ANTHROPIC_API_KEY=...</code>، ثم أعد تشغيل التطبيق. المفتاح يبقى على الخادم ولا يصل إلى المتصفح.</p></div></section>}
-
-      <section className="agents-row">
-        <AgentCard number="1" title="محلل الشركة" role="يقرأ الموقع ويبني ذاكرة موثّقة" icon={Globe} status={runs.analyst} active={agentActive === 1} />
-        <ArrowLeft className="agent-arrow" size={21} />
-        <AgentCard number="2" title="كاتب المحتوى" role="يختار الزاوية ويكتب بصوت العلامة" icon={PencilSimple} status={runs.writer} active={agentActive === 2} />
-        <ArrowLeft className="agent-arrow" size={21} />
-        <AgentCard number="3" title="محرك التصميم" role="يرسم كل صفحة مباشرة بموتيفها الفعلي" icon={Palette} status={runs.designer} active={agentActive === 3} />
-      </section>
-
-      {error && <div className="error-banner"><WarningCircle size={18} />{error}<button onClick={() => setError("")}>×</button></div>}
-
-      {stage === 1 && <section className="stage-grid">
-        <div className="work-panel">
-          <div className="stage-title"><span>01</span><div><h2>دع الوكيل يفهم الشركة أولاً</h2><p>سيقرأ الموقع، يستخرج الخدمات والجمهور وصوت العلامة، ويفصل الحقائق عن التخمين.</p></div></div>
-          <label>لغة المحتوى</label>
-          <div className="language-picker">
-            <button className={brief.language === "Arabic" ? "selected" : ""} onClick={() => setBrief({ ...brief, language: "Arabic", dialect: "العربية السعودية" })}><b>العربية</b><small>محتوى عربي بلهجة تختارها</small></button>
-            <button className={brief.language === "English" ? "selected" : ""} onClick={() => setBrief({ ...brief, language: "English", dialect: "English" })}><b>English</b><small>English LinkedIn content</small></button>
-          </div>
-          <label>رابط موقع الشركة</label>
-          <div className="url-input"><Globe size={18} /><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://company.com" type="url" /><button onClick={analyze} disabled={runs.analyst === "running" || !apiStatus.configured}>{runs.analyst === "running" ? <><i /> يحلل الموقع...</> : <>تحليل الشركة <ArrowLeft /></>}</button></div>
-          <label>معلومة إضافية <em>اختياري</em></label>
-          <textarea value={context} onChange={(e) => setContext(e.target.value)} placeholder="مثلاً: نستهدف الشركات الصغيرة في السعودية، ونريد لهجة مهنية وقريبة..." />
-          <div className="analysis-note"><Brain size={18} /><span><b>ما الذي سيفعله AI 1؟</b> يقرأ النصوص الظاهرة، يلتقط إشارات الهوية، ويضع أي معلومة غير مؤكدة ضمن «نواقص» بدلاً من اختراعها.</span></div>
-        </div>
-        <div className="result-panel">
-          {!profile ? <EmptyAgent icon={Globe} title="ملف الشركة سيظهر هنا" text="أدخل رابطاً وشغّل المحلل. لن ينتقل أي شيء للكاتب قبل موافقتك." /> : <>
-            <div className="result-head"><div><span>تحليل AI 1</span><h2>{profile.companyName}</h2><p>{profile.summary}</p></div><strong>{profile.confidence}%<small>ثقة التحليل</small></strong></div>
-            <div className="fact-groups">
-              <div><b>الخدمات</b>{profile.services.map((x) => <span key={x}><Check />{x}</span>)}</div>
-              <div><b>الجمهور</b>{profile.audiences.map((x) => <span key={x}><Check />{x}</span>)}</div>
-              <div><b>صوت العلامة</b><p>{profile.voice.language} · {profile.voice.dialect}</p><p>{profile.voice.traits.join("، ")}</p></div>
-              {profile.unknowns.length > 0 && <div className="unknowns"><b>معلومات ناقصة</b>{profile.unknowns.map((x) => <span key={x}><WarningCircle />{x}</span>)}</div>}
-            </div>
-            <button className="approve" onClick={() => setStage(2)}><Check weight="bold" /> اعتماد ملف الشركة وتسليمه للكاتب</button>
-          </>}
-        </div>
-      </section>}
-
-      {stage === 2 && <section className="stage-grid">
-        <div className="work-panel">
-          <button className="back" onClick={() => setStage(1)}><ArrowRight /> ملف الشركة</button>
-          <div className="stage-title"><span>02</span><div><h2>الكاتب يختار الزاوية</h2><p>أعطه الهدف فقط. يستطيع اقتراح الموضوع من ركائز الشركة أو استخدام ملاحظتك.</p></div></div>
-          <div className="two-fields"><div><label>هدف المنشور</label><select value={brief.goal} onChange={(e) => setBrief({ ...brief, goal: e.target.value })}><option>بناء الثقة والوعي</option><option>جذب عملاء محتملين</option><option>شرح خدمة</option><option>قيادة فكرية</option></select></div><div><label>{brief.language === "Arabic" ? "اللهجة" : "Content language"}</label><select value={brief.dialect} onChange={(e) => setBrief({ ...brief, dialect: e.target.value })}>{brief.language === "Arabic" ? <><option>العربية السعودية</option><option>العربية الفصحى</option></> : <option>English</option>}</select></div></div>
-          <label>شكل المنشور</label>
-          <div className="format-picker">
-            <button className={brief.format === "text_only" ? "selected" : ""} onClick={() => setBrief({ ...brief, format: "text_only" })}><PencilSimple weight="duotone" /><span><b>نص فقط</b><small>منشور بدون تصميم</small></span></button>
-            <button className={brief.format === "single_image" ? "selected" : ""} onClick={() => setBrief({ ...brief, format: "single_image" })}><ImageSquare weight="duotone" /><span><b>منشور واحد</b><small>تصميم واحد برسالة مركّزة</small></span></button>
-            <button className={brief.format === "carousel" ? "selected" : ""} onClick={() => setBrief({ ...brief, format: "carousel" })}><span className="carousel-symbol">▣</span><span><b>كاروسيل</b><small>من 4 إلى 7 صفحات</small></span></button>
-          </div>
-          <label>أمثلة أسلوبك <em>اختياري — الصق منشورًا أو اثنين تحبهم</em></label>
-          <textarea value={brief.styleExamples} onChange={(e) => setBrief({ ...brief, styleExamples: e.target.value })} placeholder="الصق منشورًا فعليًا نشرته من قبل وعجبك أسلوبه، وAI بيحاكي إيقاعه بدل الاعتماد على تخمين عام..." />
-          <label>توجيه إضافي <em>اختياري — اتركه فارغاً ليختار AI الموضوع</em></label>
-          <textarea value={brief.note} onChange={(e) => setBrief({ ...brief, note: e.target.value })} placeholder="مثلاً: اربط الموضوع بتحديات التوسع..." />
-          <button className="run-agent" onClick={() => write()} disabled={runs.writer === "running"}>{runs.writer === "running" ? <><i /> الكاتب يعمل...</> : <><MagicWand weight="fill" /> دع الكاتب يختار ويكتب</>}</button>
-        </div>
-        <div className="result-panel content-result">
-          {!content ? <EmptyAgent icon={PencilSimple} title="الكاتب بانتظار الإشارة" text="سيختار زاوية غير عامة ويستخدم الحقائق المعتمدة من ملف الشركة." /> : <>
-            <div className="content-top"><span>الزاوية التي اختارها AI</span><h2>{content.angle}</h2><button onClick={() => copyValue(captionText, "تم نسخ الكابشن")}><Copy /> نسخ الكابشن</button></div>
-            {content.alternativeAngles?.length > 0 && <div className="alt-angles"><b>زوايا بديلة</b>{content.alternativeAngles.map((angle) => <button key={angle} onClick={() => useAlternativeAngle(angle)} disabled={runs.writer === "running"}>{angle}<span>جرّب هذي</span></button>)}</div>}
-            <label className="editable-label">الخطاف <em>قابل للتعديل</em></label>
-            <textarea className="editable-copy hook" value={editableContent.hook} onChange={(e) => setEditableContent({ ...editableContent, hook: e.target.value })} />
-            <label className="editable-label">النص <em>قابل للتعديل</em></label>
-            <textarea className="editable-copy post" value={editableContent.post} onChange={(e) => setEditableContent({ ...editableContent, post: e.target.value })} />
-            <label className="editable-label">الدعوة للفعل <em>قابل للتعديل</em></label>
-            <textarea className="editable-copy cta" value={editableContent.cta} onChange={(e) => setEditableContent({ ...editableContent, cta: e.target.value })} />
-            <div className="hashtags">{content.hashtags.map((x) => <span key={x}>{x}</span>)}</div>
-            <div className="audit"><ShieldCheck /><span><b>الحقائق المستخدمة</b>{content.factsUsed.join(" · ") || "لا توجد ادعاءات رقمية"}</span></div>
-            {content.recommendedFormat === "text_only"
-              ? <button className="approve" onClick={() => setStage(4)}><Check weight="bold" /> المنشور جاهز للنشر</button>
-              : <button className="approve" onClick={() => setStage(3)}><Check weight="bold" /> اعتماد النص وتسليمه للمصمم</button>}
-          </>}
-        </div>
-      </section>}
-
-      {stage === 3 && <section className="stage-grid design-stage">
-        <div className="work-panel">
-          <button className="back" onClick={() => setStage(2)}><ArrowRight /> المحتوى</button>
-          <div className="stage-title"><span>03</span><div><h2>ولّد التصميم بنظام PWP</h2><p>يترسم مباشرة بالكود لكل صفحة بموتيفها — عدّل النص أو بدّل الموتيف مباشرة من المعاينة.</p></div></div>
-          <label>اللوغو</label><label className="logo-control"><input type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={uploadLogo} /><img src={logo} alt="اللوغو" /><span><UploadSimple /> رفع أو تغيير اللوغو</span></label>
-          <label>ألوان الهوية</label><div className="palette-control">{palette.map((color, i) => <label key={`${color}-${i}`}><input type="color" value={color} onChange={(e) => setPalette(palette.map((c, n) => n === i ? e.target.value : c))} /><span style={{ background: color }} /></label>)}</div>
-          <label>خط Google Fonts</label>
-          <div className="font-control">
-            <div className="font-search"><MagnifyingGlass /><input value={fontSearch} onChange={(e) => setFontSearch(e.target.value)} placeholder="ابحث في جميع خطوط Google Fonts..." /></div>
-            <div className="font-catalog-meta"><span>{fontCatalogSource === "loading" ? "يتم تحميل مكتبة الخطوط..." : `${fontCatalog.length.toLocaleString()} خط متاح`}</span><small>يتم تحميل الخط المختار فقط للحفاظ على السرعة</small></div>
-            <div className="font-options">
-              <button className={fontPreference === "auto" ? "selected" : ""} onClick={() => setFontPreference("auto")}><b>نظام PWP</b><small>Baloo Bhaijaan 2</small></button>
-              {fontSearch.trim() && !hasExactFontMatch && <button className="custom-font" onClick={() => setFontPreference(fontSearch.trim())}><b>استخدام “{fontSearch.trim()}”</b><small>استخدم الاسم مباشرة من Google Fonts</small></button>}
-              {filteredFonts.map((font) => <button key={font.family} className={fontPreference === font.family ? "selected" : ""} onClick={() => setFontPreference(font.family)} style={{ fontFamily: `'${font.family}', sans-serif` }}><b>{font.family}</b><small>{(font.scripts || []).some((script) => script.toLowerCase() === "arabic") ? "يدعم العربية" : font.category || "Google Font"}</small></button>)}
-              {filteredFonts.length === 0 && !fontSearch.trim() && <p>تعذّر تحميل المكتبة الكاملة. يمكنك كتابة اسم أي خط واستخدامه مباشرة.</p>}
-            </div>
-            <div className="font-preview" style={{ fontFamily: `'${previewFont}', sans-serif` }}><span>{previewFont}</span><b>فكرة واضحة، بتصميم يليق بعلامتك.</b></div>
-          </div>
-          <button className="run-agent" onClick={designPost} disabled={!content}><ImageSquare weight="fill" /> إنشاء التصميم</button>
-        </div>
-        <div className="result-panel design-result">
-          {!design ? <EmptyAgent icon={Palette} title="التصميم سيظهر هنا" text="اضبط الهوية والخط، ثم أنشئ التصميم." /> : <>
-            <div className="design-meta"><div><span>نظام الموتيفات · A–H</span><h2>معاينة حقيقية لكل صفحة بموتيفها الفعلي</h2><p>عدّل العنوان أو النص مباشرة تحت كل صفحة، أو بدّل الموتيف بزر واحد.</p></div><b>{content?.recommendedFormat === "carousel" ? `${content.carouselSlides?.length || 0} صفحات` : "صورة واحدة"} · 1080 × 1080</b></div>
-            {previewRendering || !previewPngs.length ? <div className="preview-loading"><i /> جاري تجهيز معاينة PWP المطابقة للتنزيل...</div> : design?.format === "carousel" ? (
-              <div className="slides-preview canonical-slides editable-slides">
-                {design.slides.map((slide, i) => (
-                  <article key={`pwp-preview-${i}`}>
-                    <img src={previewPngs[i]} alt={`معاينة الصفحة ${i + 1}`} />
-                    <div className="slide-editor-controls">
-                      <button className="motif-switch" onClick={() => cycleMotif(i)}><ArrowsClockwise /> {MOTIF_LABELS[slide.motif] || slide.motif}</button>
-                      <textarea rows={1} value={slide.headline} onChange={(e) => updateSlideField(i, "headline", e.target.value)} placeholder="العنوان" />
-                      <textarea rows={2} value={slide.body} onChange={(e) => updateSlideField(i, "body", e.target.value)} placeholder="النص" />
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <div className="canonical-preview editable-slides">
-                <img src={previewPngs[0]} alt="معاينة التصميم" />
-                <div className="slide-editor-controls">
-                  <button className="motif-switch" onClick={() => cycleMotif(0)}><ArrowsClockwise /> {MOTIF_LABELS[design.motif] || design.motif}</button>
-                  <textarea rows={1} value={design.headline} onChange={(e) => updateSlideField(0, "headline", e.target.value)} placeholder="العنوان" />
-                  <textarea rows={2} value={design.body} onChange={(e) => updateSlideField(0, "body", e.target.value)} placeholder="النص" />
-                </div>
-              </div>
-            )}
-            <div className="design-actions phase-one-actions"><button onClick={downloadDesign} disabled={fontEmbedding || !embeddedFontCss || previewRendering}><DownloadSimple weight="bold" /> SVG</button><button className="approve" onClick={downloadDesignPng} disabled={fontEmbedding || !embeddedFontCss || previewRendering}><DownloadSimple weight="bold" /> تحميل PNG</button></div>
-            <div className="delivery-grid">
-              <article><div><span>كابشن المنشور</span><button onClick={() => copyValue(captionText, "تم نسخ الكابشن")}><Copy /> نسخ</button></div><p>{captionText}</p></article>
-              <article><div><span>الهاشتاغات المقترحة</span><button onClick={() => copyValue(hashtagText, "تم نسخ الهاشتاغات")}><Copy /> نسخ</button></div><p className="delivery-hashtags">{hashtagText}</p></article>
-            </div>
-            <div className="design-actions"><button onClick={() => setStage(2)}><PencilSimple /> تعديل المحتوى</button></div>
-          </>}
-        </div>
-      </section>}
-
-      {stage === 4 && <section className="stage-grid">
-        <div className="work-panel">
-          <button className="back" onClick={() => setStage(2)}><ArrowRight /> المحتوى</button>
-          <div className="stage-title"><span>04</span><div><h2>منشور نصي — بدون تصميم</h2><p>اخترت «نص فقط»، فمحرك التصميم مو مطلوب لهذا المنشور. انسخ وانشر مباشرة.</p></div></div>
-          <div className="analysis-note"><ShieldCheck size={18} /><span>ما تحتاج للمصمم؟ اضغط «تعديل المحتوى» وغيّر الشكل إلى «منشور واحد» أو «كاروسيل» أي وقت.</span></div>
-        </div>
-        <div className="result-panel">
-          <div className="content-top"><span>جاهز للنشر</span><h2>{content?.angle}</h2><button onClick={() => copyValue(captionText, "تم نسخ الكابشن")}><Copy /> نسخ الكابشن</button></div>
-          <p className="post-copy" style={{ whiteSpace: "pre-line" }}>{captionText}</p>
-          <div className="hashtags">{content?.hashtags?.map((x) => <span key={x}>{x}</span>)}</div>
-        </div>
-      </section>}
-    </main>
-    {notice && <div className="toast">{notice}<Check /></div>}
-  </div>;
+  };
 }
