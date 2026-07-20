@@ -1,6 +1,6 @@
 # Post With Passion — AI LinkedIn Content Studio
 
-Three-stage workflow for company analysis, LinkedIn copywriting, and PWP design-system output with a Canva-ready prompt.
+Three-stage workflow for company analysis, LinkedIn copywriting, and PWP design-system output — every page is rendered directly as SVG/PNG, ready to publish.
 
 ## Local setup
 
