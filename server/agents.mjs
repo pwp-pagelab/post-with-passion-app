@@ -26,7 +26,7 @@ const schemas = {
       confidence: { type: "number", minimum: 0, maximum: 100 }
     }
   },
-  linkedin_content: {
+  linkedin_content: (format) => ({
     type: "object",
     additionalProperties: false,
     required: ["angle", "alternativeAngles", "hook", "post", "cta", "hashtags", "recommendedFormat", "designCopy", "carouselSlides", "factsUsed"],
@@ -40,13 +40,18 @@ const schemas = {
         headline: { type: "string" }, body: { type: "string" }, category: { type: "string" },
         slideType: { type: "string", enum: ["hook", "explanatory", "quote", "conclusion", "comparison", "numbered", "statement", "standard"] }
       } },
-      carouselSlides: { type: "array", items: { type: "object", additionalProperties: false, required: ["headline", "body", "category", "slideType"], properties: {
-        headline: { type: "string" }, body: { type: "string" }, category: { type: "string" },
-        slideType: { type: "string", enum: ["hook", "explanatory", "quote", "conclusion", "comparison", "numbered", "statement", "standard"] }
-      } } },
+      carouselSlides: {
+        type: "array",
+        minItems: format === "carousel" ? 4 : 0,
+        maxItems: format === "carousel" ? 7 : 0,
+        items: { type: "object", additionalProperties: false, required: ["headline", "body", "category", "slideType"], properties: {
+          headline: { type: "string" }, body: { type: "string" }, category: { type: "string" },
+          slideType: { type: "string", enum: ["hook", "explanatory", "quote", "conclusion", "comparison", "numbered", "statement", "standard"] }
+        } }
+      },
       factsUsed: { type: "array", items: { type: "string" } }
     }
-  },
+  }),
   design_spec: {
     type: "object",
     additionalProperties: false,
@@ -220,11 +225,22 @@ export function createAgentsMiddleware({ googleFontsApiKey, anthropicApiKey, ant
         const styleExamples = Array.isArray(body.brief?.styleExamples)
           ? body.brief.styleExamples.filter(Boolean).slice(0, 3)
           : String(body.brief?.styleExamples || "").trim() ? [String(body.brief.styleExamples).trim()] : [];
-        const result = await runClaude({ apiKey: anthropicApiKey, model: anthropicModel, schema: schemas.linkedin_content,
+        const baseInstructions = "You are LinkedIn Content Strategist and carousel editor, the second of three agents. Use only the approved brand profile and user brief. Never add unsupported claims.\n\nBANNED PATTERNS — never use these, in any language: generic openers like 'In today's world', 'في عالم اليوم', 'الحقيقة إن', 'دعني أخبرك'; rhetorical questions as openers ('هل تعلم أن...?', 'Did you know...?'); rocket/fire/sparkle emojis or any emoji used as a bullet marker; three-item listicle structures unless the content is genuinely three real steps; corporate filler words (unlock, leverage, seamless, game-changer, revolutionize, تمكين, نقلة نوعية, ثورة في); a hook that just restates the headline as a question; closing with 'What do you think? Comment below' unless the brief goal is genuinely to spark discussion. If the brand voice 'avoid' list bans something, treat it as equally forbidden.\n\nPUNCTUATION: When writing Arabic, use Arabic-shaped punctuation only — '،' not ',', '؟' not '?', '؛' not ';'. Never put a space before any punctuation mark. Never leave a comma or period stranded at the start of a clause; punctuation always attaches directly to the word before it. Keep numerals as plain digits (e.g. '80', '3') even inside Arabic sentences — do not spell them out and do not add stray spacing around them.\n\nVOICE MATCHING: If styleExamples are supplied, they are real posts the client already likes. Match their sentence rhythm, average sentence length, and level of formality closely — treat them as the ground truth for voice, weighted above the generic brand voice traits. Do not copy their specific claims or sentences, only the writing style.\n\nCreate designCopy with one short visual idea: headline maximum 6-8 words, body maximum 20-25 words, category maximum two words, and an accurate slideType. Never shrink or overload design copy. If recommendedFormat is text_only, still populate designCopy from the post's core idea in case the user changes format later, and return an empty carouselSlides array. For single_image, return an empty carouselSlides array. For carousel, produce EXACTLY 5 slides (never fewer than 4, never more than 7), one idea per slide — this is a hard requirement, not a suggestion. The first slide is slideType hook and the last is conclusion. Use comparison only for real contrast, numbered for steps or numbered ideas, quote for a genuine voice/opinion, statement for a short strong assertion, explanatory for analysis, and standard otherwise. Do not lose meaning or add claims while splitting.\n\nChoose one sharp, non-generic angle for the main post. Also return alternativeAngles: exactly two other genuinely different one-line angle ideas (different enough that picking one would change the whole post, not just its phrasing) that this brand could also credibly post about right now, so the user can pick a different direction without leaving the app. Return factsUsed so the user can audit the copy.";
+        const input = `Approved brand profile:\n${JSON.stringify(body.brandProfile)}\nContent brief:\n${JSON.stringify(body.brief)}${styleExamples.length ? `\nReal posts to match the voice of (style only, do not reuse claims):\n${styleExamples.map((example, i) => `Example ${i + 1}:\n${example}`).join("\n\n")}` : ""}`;
+        const wantsCarousel = body.brief?.format === "carousel";
+        const callWriter = (instructions) => runClaude({ apiKey: anthropicApiKey, model: anthropicModel, schema: schemas.linkedin_content(body.brief?.format),
           toolName: "submit_linkedin_content", toolDescription: "Return the final approved LinkedIn content and design copy.",
-          instructions: "You are LinkedIn Content Strategist and carousel editor, the second of three agents. Use only the approved brand profile and user brief. Never add unsupported claims.\n\nBANNED PATTERNS — never use these, in any language: generic openers like 'In today's world', 'في عالم اليوم', 'الحقيقة إن', 'دعني أخبرك'; rhetorical questions as openers ('هل تعلم أن...?', 'Did you know...?'); rocket/fire/sparkle emojis or any emoji used as a bullet marker; three-item listicle structures unless the content is genuinely three real steps; corporate filler words (unlock, leverage, seamless, game-changer, revolutionize, تمكين, نقلة نوعية, ثورة في); a hook that just restates the headline as a question; closing with 'What do you think? Comment below' unless the brief goal is genuinely to spark discussion. If the brand voice 'avoid' list bans something, treat it as equally forbidden.\n\nPUNCTUATION: When writing Arabic, use Arabic-shaped punctuation only — '،' not ',', '؟' not '?', '؛' not ';'. Never put a space before any punctuation mark. Never leave a comma or period stranded at the start of a clause; punctuation always attaches directly to the word before it. Keep numerals as plain digits (e.g. '80', '3') even inside Arabic sentences — do not spell them out and do not add stray spacing around them.\n\nVOICE MATCHING: If styleExamples are supplied, they are real posts the client already likes. Match their sentence rhythm, average sentence length, and level of formality closely — treat them as the ground truth for voice, weighted above the generic brand voice traits. Do not copy their specific claims or sentences, only the writing style.\n\nCreate designCopy with one short visual idea: headline maximum 6-8 words, body maximum 20-25 words, category maximum two words, and an accurate slideType. Never shrink or overload design copy. If recommendedFormat is text_only, still populate designCopy from the post's core idea in case the user changes format later, and return an empty carouselSlides array. For single_image, return an empty carouselSlides array. For carousel, produce 4-7 slides, exactly one idea per slide. Each carousel headline is maximum 6-8 words and each body is maximum 20-25 words. The first slide is slideType hook and the last is conclusion. Use comparison only for real contrast, numbered for steps or numbered ideas, quote for a genuine voice/opinion, statement for a short strong assertion, explanatory for analysis, and standard otherwise. Do not lose meaning or add claims while splitting.\n\nChoose one sharp, non-generic angle for the main post. Also return alternativeAngles: exactly two other genuinely different one-line angle ideas (different enough that picking one would change the whole post, not just its phrasing) that this brand could also credibly post about right now, so the user can pick a different direction without leaving the app. Return factsUsed so the user can audit the copy.",
-          input: `Approved brand profile:\n${JSON.stringify(body.brandProfile)}\nContent brief:\n${JSON.stringify(body.brief)}${styleExamples.length ? `\nReal posts to match the voice of (style only, do not reuse claims):\n${styleExamples.map((example, i) => `Example ${i + 1}:\n${example}`).join("\n\n")}` : ""}` });
-        result.recommendedFormat = body.brief?.format === "carousel" ? "carousel" : body.brief?.format === "text_only" ? "text_only" : "single_image";
+          instructions, input });
+        let result = await callWriter(baseInstructions);
+        if (wantsCarousel && (result.carouselSlides?.length || 0) < 4) {
+          // Claude's tool schema is a strong hint, not a hard database-level constraint like OpenAI's
+          // strict JSON mode — retry once with a sharper, more insistent instruction before giving up.
+          result = await callWriter(`${baseInstructions}\n\nCRITICAL: your previous attempt returned only ${result.carouselSlides?.length || 0} carousel slides. This is invalid — carouselSlides MUST contain between 4 and 7 items. Split the idea across more slides if needed. Do not return fewer than 4.`);
+        }
+        if (wantsCarousel && (result.carouselSlides?.length || 0) < 4) {
+          return json(res, 502, { error: "تعذّر توليد كل صفحات الكاروسيل. جرّب تشغّل الكاتب مرة ثانية." });
+        }
+        result.recommendedFormat = wantsCarousel ? "carousel" : body.brief?.format === "text_only" ? "text_only" : "single_image";
         if (result.recommendedFormat !== "carousel") result.carouselSlides = [];
         return json(res, 200, { result });
       }
