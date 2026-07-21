@@ -233,7 +233,7 @@ function footerBlock({ x, arabic, foreground, pageNumber, page, category }) {
     <text x="${arabic ? 990 : 90}" y="1022" fill="${foreground}" font-size="22" font-weight="600" text-anchor="${arabic ? "end" : "start"}" direction="auto">${escapeXml(prepareText(category || ""))}</text>`;
 }
 
-function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, palette, font, fontCss = "", logo, page = 1 }) {
+function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, palette, font, fontCss = "", logo, page = 1, photoUrl = "" }) {
   const dark = palette[0] || "#0E3A31";
   const green = palette[1] || "#168164";
   const gold = palette[2] || "#D7C196";
@@ -250,6 +250,30 @@ function makeDesignSvg({ headline, body, footer, category, motif, pageNumber, pa
   const ghostWord = words(headline).slice(0, 1).join("") || "PWP";
   const preparedCategory = prepareText(category || "");
   const preparedFooterCat = prepareText(footer || category || "");
+
+  if (photoUrl) {
+    // Photographic background (Higgsfield) — real photography instead of flat color/vector,
+    // with a gradient scrim so headline/body/footer stay legible over any image.
+    const gradDark = dark;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
+      ${styleTag}
+      <defs>
+        <linearGradient id="photoScrim" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${gradDark}" stop-opacity="0.15"/>
+          <stop offset="45%" stop-color="${gradDark}" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="${gradDark}" stop-opacity="0.92"/>
+        </linearGradient>
+      </defs>
+      <image href="${escapeXml(photoUrl)}" x="0" y="0" width="1080" height="1080" preserveAspectRatio="xMidYMid slice"/>
+      <rect x="0" y="0" width="1080" height="1080" fill="url(#photoScrim)"/>
+      ${logoTag}
+      <rect x="${arabic ? 900 : 90}" y="150" width="90" height="34" rx="17" fill="${gold}"/>
+      <text x="${arabic ? 945 : 135}" y="173" fill="${onColor(gold)}" font-size="16" font-weight="700" text-anchor="middle">${escapeXml(preparedCategory)}</text>
+      ${svgText({ text: headline, x, y: 700, size: 62, lineHeight: 74, weight: 800, fill: "#FFFFFF", anchor, maxLines: 3, limit: 22 })}
+      ${svgText({ text: body, x, y: 900, size: 28, lineHeight: 40, weight: 400, fill: "#FFFFFF", anchor, maxLines: 3, limit: 44 })}
+      ${footerBlock({ x, arabic, foreground: "#FFFFFF", pageNumber, page, category })}
+    </svg>`;
+  }
 
   if (motif === "A") {
     const textOnDark = onColor(dark);
@@ -484,7 +508,8 @@ function EmptyAgent({ icon: Icon, title, text }) {
 }
 
 export function App() {
-  const [apiStatus, setApiStatus] = useState({ loading: true, configured: false, model: "", designerConfigured: false, designerModel: "" });
+  const [apiStatus, setApiStatus] = useState({ loading: true, configured: false, model: "", designerConfigured: false, designerModel: "", higgsfieldConfigured: false });
+  const [photoLoading, setPhotoLoading] = useState({});
   const [stage, setStage] = useState(1);
   const [runs, setRuns] = useState(initialRuns);
   const [url, setUrl] = useState("");
@@ -619,6 +644,24 @@ export function App() {
     });
   }
 
+  async function generateBackgroundImage(index, slide) {
+    setPhotoLoading((prev) => ({ ...prev, [index]: true }));
+    setError("");
+    try {
+      const prompt = `${slide.category || ""}: ${slide.headline}`.trim();
+      const data = await api("/api/agents/background-image", { prompt });
+      updateSlideField(index, "photoUrl", data.url);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setPhotoLoading((prev) => ({ ...prev, [index]: false }));
+    }
+  }
+
+  function removeBackgroundImage(index) {
+    updateSlideField(index, "photoUrl", "");
+  }
+
   function uploadLogo(event) {
     const file = event.target.files?.[0];
     if (file) {
@@ -663,7 +706,7 @@ export function App() {
 
   const agentActive = runs.designer === "running" || stage === 3 ? 3 : runs.writer === "running" || stage === 2 || stage === 4 ? 2 : 1;
   const slides = useMemo(() => design?.slides?.length ? design.slides : content?.carouselSlides || [], [design, content]);
-  const designPages = useMemo(() => design?.format === "carousel" ? slides : design ? [{ headline: design.headline, body: design.body, footer: design.footer, category: design.category, motif: design.motif, pageNumber: design.pageNumber }] : [], [design, slides]);
+  const designPages = useMemo(() => design?.format === "carousel" ? slides : design ? [{ headline: design.headline, body: design.body, footer: design.footer, category: design.category, motif: design.motif, pageNumber: design.pageNumber, photoUrl: design.photoUrl }] : [], [design, slides]);
   const designText = useMemo(() => {
     const contentText = designPages.map((page) => `${page.headline || ""} ${page.body || ""} ${page.footer || ""} ${page.category || ""}`).join(" ").trim();
     // Always request full digit coverage (and the smart-quote glyph used by one motif) regardless of
@@ -814,6 +857,9 @@ export function App() {
                     <img src={previewPngs[i]} alt={`معاينة الصفحة ${i + 1}`} />
                     <div className="slide-editor-controls">
                       <button className="motif-switch" onClick={() => cycleMotif(i)}><ArrowsClockwise /> {MOTIF_LABELS[slide.motif] || slide.motif}</button>
+                      {apiStatus.higgsfieldConfigured && (slide.photoUrl
+                        ? <button className="motif-switch" onClick={() => removeBackgroundImage(i)}><ImageSquare /> إزالة الخلفية الفوتوغرافية</button>
+                        : <button className="motif-switch" onClick={() => generateBackgroundImage(i, slide)} disabled={photoLoading[i]}><ImageSquare /> {photoLoading[i] ? "يولّد الصورة..." : "خلفية فوتوغرافية بالذكاء الاصطناعي"}</button>)}
                       <textarea rows={1} value={slide.headline} onChange={(e) => updateSlideField(i, "headline", e.target.value)} placeholder="العنوان" />
                       <textarea rows={2} value={slide.body} onChange={(e) => updateSlideField(i, "body", e.target.value)} placeholder="النص" />
                     </div>
@@ -825,6 +871,9 @@ export function App() {
                 <img src={previewPngs[0]} alt="معاينة التصميم" />
                 <div className="slide-editor-controls">
                   <button className="motif-switch" onClick={() => cycleMotif(0)}><ArrowsClockwise /> {MOTIF_LABELS[design.motif] || design.motif}</button>
+                  {apiStatus.higgsfieldConfigured && (design.photoUrl
+                    ? <button className="motif-switch" onClick={() => removeBackgroundImage(0)}><ImageSquare /> إزالة الخلفية الفوتوغرافية</button>
+                    : <button className="motif-switch" onClick={() => generateBackgroundImage(0, design)} disabled={photoLoading[0]}><ImageSquare /> {photoLoading[0] ? "يولّد الصورة..." : "خلفية فوتوغرافية بالذكاء الاصطناعي"}</button>)}
                   <textarea rows={1} value={design.headline} onChange={(e) => updateSlideField(0, "headline", e.target.value)} placeholder="العنوان" />
                   <textarea rows={2} value={design.body} onChange={(e) => updateSlideField(0, "body", e.target.value)} placeholder="النص" />
                 </div>
