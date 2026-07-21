@@ -1,4 +1,5 @@
 import { GOOGLE_FONTS, GOOGLE_FONT_FAMILIES } from "../shared/google-fonts.mjs";
+import { createHiggsfieldClient } from "@higgsfield/client/v2";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models?limit=100";
@@ -199,12 +200,18 @@ async function runClaude({ apiKey, model, schema, instructions, input, toolName 
   return toolUse.input;
 }
 
-export function createAgentsMiddleware({ googleFontsApiKey, anthropicApiKey, anthropicModel }) {
+export function createAgentsMiddleware({ googleFontsApiKey, anthropicApiKey, anthropicModel, higgsfieldApiKey, higgsfieldApiSecret }) {
+  const higgsfieldConfigured = Boolean(higgsfieldApiKey && higgsfieldApiSecret);
+  const higgsfieldClient = higgsfieldConfigured
+    ? createHiggsfieldClient({ apiKey: higgsfieldApiKey, apiSecret: higgsfieldApiSecret })
+    : null;
+
   return async function agentsMiddleware(req, res, next) {
     if (!req.url?.startsWith("/api/")) return next();
     if (req.method === "GET" && req.url === "/api/status") return json(res, 200, {
       configured: Boolean(anthropicApiKey),
-      model: anthropicModel
+      model: anthropicModel,
+      higgsfieldConfigured
     });
     if (req.method === "GET" && req.url === "/api/fonts") {
       const catalog = await fetchFontCatalog(googleFontsApiKey);
@@ -213,6 +220,23 @@ export function createAgentsMiddleware({ googleFontsApiKey, anthropicApiKey, ant
     if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
     try {
       const body = await readJson(req);
+      if (req.url === "/api/agents/background-image") {
+        if (!higgsfieldClient) return json(res, 503, { error: "خدمة الصور الفوتوغرافية غير مفعّلة. أضف HIGGSFIELD_API_KEY وHIGGSFIELD_API_SECRET." });
+        const prompt = String(body.prompt || "").trim();
+        if (!prompt) return json(res, 400, { error: "الوصف فارغ." });
+        const response = await higgsfieldClient.subscribe("/v1/text2image/soul", {
+          input: {
+            prompt: `${prompt}. Photorealistic, natural lighting, no text, no logos, no watermarks, negative space suitable for a text overlay.`,
+            width_and_height: "1024x1024",
+            quality: "1080p",
+            batch_size: 1
+          },
+          withPolling: true
+        });
+        const imageUrl = response.images?.[0]?.url;
+        if (!imageUrl) return json(res, 502, { error: "هيقسفيلد ما رجع صورة. جرّب وصف مختلف." });
+        return json(res, 200, { url: imageUrl });
+      }
       if (req.url === "/api/agents/analyze") {
         const site = await fetchWebsite(body.url);
         const result = await runClaude({ apiKey: anthropicApiKey, model: anthropicModel, schema: schemas.brand_profile,
