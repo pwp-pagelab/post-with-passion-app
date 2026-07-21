@@ -253,7 +253,7 @@ export function createAgentsMiddleware({ googleFontsApiKey, anthropicApiKey, ant
           endpoint: "/v1/text2image/soul",
           params: {
             prompt: `${prompt}. Photorealistic, natural lighting, no text, no logos, no watermarks, negative space suitable for a text overlay.`,
-            width_and_height: "1024x1024",
+            width_and_height: "1536x1536",
             quality: "1080p",
             batch_size: 1
           }
