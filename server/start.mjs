@@ -10,7 +10,9 @@ const port = Number(process.env.PORT || 4173);
 const agents = createAgentsMiddleware({
   googleFontsApiKey: process.env.GOOGLE_FONTS_API_KEY,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-  anthropicModel: process.env.ANTHROPIC_MODEL || "claude-sonnet-5"
+  anthropicModel: process.env.ANTHROPIC_MODEL || "claude-sonnet-5",
+  higgsfieldApiKey: process.env.HIGGSFIELD_API_KEY,
+  higgsfieldApiSecret: process.env.HIGGSFIELD_API_SECRET
 });
 
 const types = {
